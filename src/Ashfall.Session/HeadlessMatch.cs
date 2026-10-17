@@ -1,0 +1,159 @@
+using System.Runtime.InteropServices;
+using Ashfall.Core;
+using Ashfall.Session.Commands;
+using Ashfall.Simulation;
+using Ashfall.Simulation.Commands;
+
+namespace Ashfall.Session;
+
+/// <summary>
+/// Hosts one match without a window or GPU: builds the simulation from a <see cref="MatchSpec"/>,
+/// gathers commands from every <see cref="ICommandSource"/> each tick, paces ticks with a
+/// <see cref="SessionClock"/> and records a hash checkpoint every
+/// <see cref="SimulationConstants.HashCheckInterval"/> ticks. The client wraps the same host.
+/// </summary>
+public sealed class HeadlessMatch : IAsyncDisposable
+{
+    private readonly List<ICommandSource> _sources = [];
+    private readonly List<Command> _tickCommands = [];
+    private readonly List<HashCheckpoint> _checkpoints = [];
+    private readonly TimeProvider _timeProvider;
+
+    private HeadlessMatch(MatchSpec spec, GameSpeed speed, TimeProvider timeProvider)
+    {
+        Spec = spec;
+        _timeProvider = timeProvider;
+        Clock = new SessionClock(speed, timeProvider);
+        Simulation = new GameSimulation(spec.Seed, spec.Map);
+        SpawnStartingUnits();
+
+        for (var player = 0; player < spec.Players; player++)
+        {
+            if (spec.OrderIntervalTicks > 0 && spec.OrdersPerInterval > 0)
+            {
+                _sources.Add(new WanderOrdersSource(player, spec.Seed, spec.OrderIntervalTicks, spec.OrdersPerInterval));
+            }
+        }
+    }
+
+    public MatchSpec Spec { get; }
+
+    public GameSimulation Simulation { get; }
+
+    public SessionClock Clock { get; }
+
+    public long Tick => Simulation.Tick;
+
+    public IReadOnlyList<HashCheckpoint> Checkpoints => _checkpoints;
+
+    /// <summary>Creates a match ready to run from tick 0.</summary>
+    public static HeadlessMatch Start(MatchSpec spec, GameSpeed speed, TimeProvider? timeProvider = null)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        spec.Validate();
+        return new HeadlessMatch(spec, speed, timeProvider ?? TimeProvider.System);
+    }
+
+    /// <summary>Async form of <see cref="Start"/>; network sessions will need to await peers here.</summary>
+    public static ValueTask<HeadlessMatch> StartAsync(MatchSpec spec, GameSpeed speed, TimeProvider? timeProvider = null) =>
+        ValueTask.FromResult(Start(spec, speed, timeProvider));
+
+    /// <summary>Adds a source of commands (a scripted test, an AI, a player).</summary>
+    public HeadlessMatch AddCommandSource(ICommandSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        _sources.Add(source);
+        return this;
+    }
+
+    /// <summary>Changes game speed; takes effect from the next tick.</summary>
+    public void SetSpeed(GameSpeed speed) => Clock.Restart(speed, Tick);
+
+    /// <summary>Runs exactly one tick immediately, ignoring the clock.</summary>
+    public void Step()
+    {
+        _tickCommands.Clear();
+        foreach (var source in _sources)
+        {
+            source.CollectCommands(Simulation, Simulation.Tick, _tickCommands);
+        }
+
+        Simulation.Step(CollectionsMarshal.AsSpan(_tickCommands));
+
+        if (Simulation.Tick % SimulationConstants.HashCheckInterval == 0)
+        {
+            _checkpoints.Add(new HashCheckpoint(Simulation.Tick, Simulation.ComputeStateHash()));
+        }
+    }
+
+    /// <summary>
+    /// Runs ticks at the clock's speed until <paramref name="stopWhen"/> returns true or
+    /// <paramref name="maxTicks"/> ticks have run in this call. Limits are in ticks, never seconds,
+    /// so results do not depend on machine speed.
+    /// </summary>
+    public async Task<MatchResult> RunUntilAsync(
+        Func<HeadlessMatch, bool> stopWhen,
+        long maxTicks,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stopWhen);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxTicks);
+
+        var started = _timeProvider.GetTimestamp();
+        var firstTick = Simulation.Tick;
+        Clock.Restart(Clock.Speed, firstTick);
+        var reason = StopReason.TickLimit;
+
+        while (Simulation.Tick - firstTick < maxTicks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (stopWhen(this))
+            {
+                reason = StopReason.ConditionMet;
+                break;
+            }
+
+            await Clock.WaitUntilDueAsync(Simulation.Tick, cancellationToken).ConfigureAwait(false);
+            Step();
+        }
+
+        if (reason == StopReason.TickLimit && stopWhen(this))
+        {
+            reason = StopReason.ConditionMet;
+        }
+
+        return new MatchResult(
+            Simulation.Tick,
+            Simulation.ComputeStateHash(),
+            reason,
+            Simulation.Tick - firstTick,
+            _timeProvider.GetElapsedTime(started),
+            _checkpoints.ToArray());
+    }
+
+    /// <summary>Runs exactly <paramref name="ticks"/> ticks at the clock's speed.</summary>
+    public Task<MatchResult> RunTicksAsync(long ticks, CancellationToken cancellationToken = default) =>
+        RunUntilAsync(static _ => false, ticks, cancellationToken);
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private void SpawnStartingUnits()
+    {
+        // Each player starts in its own vertical band of the map; positions come from the simulation's
+        // random stream, so every peer places units identically.
+        var random = Simulation.Random;
+        var bounds = Simulation.Bounds;
+        var bandWidth = Fix64.FromRatio(bounds.Width, Spec.Players);
+        for (var player = 0; player < Spec.Players; player++)
+        {
+            var left = bandWidth * player;
+            for (var unit = 0; unit < Spec.UnitsPerPlayer; unit++)
+            {
+                var position = new FixVec2(
+                    random.NextFix64(left, left + bandWidth),
+                    random.NextFix64(Fix64.Zero, Fix64.FromInt(bounds.Height)));
+                Simulation.SpawnUnit(player, position, Spec.UnitSpeedPerTick);
+            }
+        }
+    }
+}

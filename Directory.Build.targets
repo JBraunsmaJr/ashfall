@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    Deterministic projects (Ashfall.Core, Ashfall.Simulation) get the banned-API analyzer:
+    floating point, System.Random, wall-clock time and unordered iteration are compile errors there.
+    AshfallOffline=true skips package references so the core can be compiled without NuGet access.
+  -->
+  <ItemGroup Condition="'$(AshfallDeterministic)' == 'true' and '$(AshfallOffline)' != 'true'">
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)eng/BannedSymbols.Deterministic.txt" Link="BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Deterministic primitives shared by every Ashfall project: fixed-point maths, seeded random numbers and state hashing. No dependencies.</Description>
+    <AshfallDeterministic>true</AshfallDeterministic>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+# Normalise line endings so golden files and hashes match on Windows and Linux.
+* text=auto eol=lf
+*.cs text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.hash text eol=lf
+
+# Binary content
+*.png binary
+*.ktx2 binary
+*.vox binary
+*.glb binary
+*.wav binary
+*.ogg binary

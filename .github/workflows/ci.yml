@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    name: Build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Ashfall.slnx
+
+      - name: Build
+        run: dotnet build Ashfall.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Ashfall.slnx -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Proving-ground run (twice, must match)
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --repeat 2
+          --hash-out proving-ground-${{ runner.os }}.hash
+          --checkpoints-out proving-ground-${{ runner.os }}.checkpoints
+
+      - name: Upload proving-ground hashes
+        uses: actions/upload-artifact@v4
+        with:
+          name: determinism-${{ runner.os }}
+          path: proving-ground-${{ runner.os }}.*
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ runner.os }}
+          path: TestResults
+
+  cross-platform-determinism:
+    # M0 exit gate: the same replay must produce the same hash on Windows and Linux.
+    name: Cross-platform determinism
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: determinism-*
+          merge-multiple: true
+
+      - name: Compare Linux and Windows hashes
+        run: |
+          echo "## Proving-ground state hashes" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux:   $(cat proving-ground-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows: $(cat proving-ground-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"
+          if diff proving-ground-Linux.checkpoints proving-ground-Windows.checkpoints > checkpoint.diff; then
+            echo "Identical at every 30-tick checkpoint." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Linux and Windows simulations diverged. First difference:"
+            head -n 4 checkpoint.diff
+            exit 1
+          fi
+          diff proving-ground-Linux.hash proving-ground-Windows.hash

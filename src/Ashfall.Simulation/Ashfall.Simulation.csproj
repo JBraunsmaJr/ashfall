@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The deterministic game simulation: ECS world, components, systems and commands. Renders nothing, touches no network.</Description>
+    <AshfallDeterministic>true</AshfallDeterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
+  </ItemGroup>
+
+</Project>

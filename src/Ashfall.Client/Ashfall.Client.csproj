@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The game client: composition root for the session, renderer, audio and UI. M0: a BRUTAL/GLFW window driving a real-time proving-ground match.</Description>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ashfall</AssemblyName>
+    <RootNamespace>Ashfall.Client</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Ahwoo.Brutal.Core" />
+    <PackageReference Include="Ahwoo.Brutal.Glfw" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Session\Ashfall.Session.csproj" />
+  </ItemGroup>
+
+</Project>

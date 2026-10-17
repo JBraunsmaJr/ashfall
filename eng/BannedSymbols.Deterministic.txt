@@ -1,0 +1,19 @@
+T:System.Single;Floating point is not bit-identical across machines. Use Ashfall.Core.Fix64.
+T:System.Double;Floating point is not bit-identical across machines. Use Ashfall.Core.Fix64.
+T:System.Half;Floating point is not bit-identical across machines. Use Ashfall.Core.Fix64.
+T:System.Decimal;Use Ashfall.Core.Fix64 in the simulation.
+T:System.Math;System.Math is floating-point based. Use Ashfall.Core.FixMath.
+T:System.MathF;System.MathF is floating-point based. Use Ashfall.Core.FixMath.
+T:System.Random;Use Ashfall.Core.DeterministicRandom, seeded from the match seed.
+P:System.DateTime.Now;The simulation has no wall-clock time. Use the tick number.
+P:System.DateTime.UtcNow;The simulation has no wall-clock time. Use the tick number.
+P:System.DateTimeOffset.Now;The simulation has no wall-clock time. Use the tick number.
+P:System.DateTimeOffset.UtcNow;The simulation has no wall-clock time. Use the tick number.
+P:System.Environment.TickCount;The simulation has no wall-clock time. Use the tick number.
+P:System.Environment.TickCount64;The simulation has no wall-clock time. Use the tick number.
+T:System.Diagnostics.Stopwatch;The simulation has no wall-clock time. Use the tick number.
+T:System.Threading.Tasks.Parallel;Parallel scheduling order differs between runs.
+M:System.Collections.Generic.Dictionary`2.GetEnumerator;Dictionary iteration order is not part of the contract. Iterate a sorted or indexed collection.
+P:System.Collections.Generic.Dictionary`2.Keys;Dictionary iteration order is not part of the contract. Iterate a sorted or indexed collection.
+P:System.Collections.Generic.Dictionary`2.Values;Dictionary iteration order is not part of the contract. Iterate a sorted or indexed collection.
+M:System.Collections.Generic.HashSet`1.GetEnumerator;HashSet iteration order is not part of the contract. Iterate a sorted or indexed collection.

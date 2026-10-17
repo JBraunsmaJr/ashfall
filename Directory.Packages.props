@@ -1,0 +1,25 @@
+<Project>
+  <!-- Central Package Management: every package version lives here, projects reference packages without versions. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Allows the floating BRUTAL versions below. Pin them once you have restored (see README). -->
+    <CentralPackageFloatingVersionsEnabled>true</CentralPackageFloatingVersionsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="BRUTAL framework">
+    <!-- Floating until the first restore; replace with the exact version `dotnet package search Ahwoo.Brutal.Glfw` reports. -->
+    <PackageVersion Include="Ahwoo.Brutal.Core" Version="*-*" />
+    <PackageVersion Include="Ahwoo.Brutal.Glfw" Version="*-*" />
+  </ItemGroup>
+
+  <ItemGroup Label="Analyzers">
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <!-- The combination xUnit 3.2.2's own VSTest template ships with (the VSTest variant of dotnet new xunit3). -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="xunit.v3.mtp-off" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+</Project>

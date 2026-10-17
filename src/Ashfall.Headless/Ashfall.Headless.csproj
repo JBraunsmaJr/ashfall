@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Headless match runner: end-to-end runs, determinism checks and (later) AI tournaments and replay verification.</Description>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ashfall-headless</AssemblyName>
+    <RootNamespace>Ashfall.Headless</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Session\Ashfall.Session.csproj" />
+  </ItemGroup>
+
+</Project>
