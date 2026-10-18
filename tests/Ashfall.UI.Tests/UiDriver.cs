@@ -141,6 +141,7 @@ internal sealed class UiDriver
         {
             if (entries[i].Label == label)
             {
+                ShowTab(entries[i].Tab);
                 var (x, y, width, height) = Screen.Sidebar.ButtonRect(i);
                 Click(new Vector2(x + (width / 2), y + (height / 2)));
                 return;
@@ -148,6 +149,17 @@ internal sealed class UiDriver
         }
 
         Assert.Fail($"No sidebar button '{label}'. Buttons: {string.Join(", ", entries.Select(e => e.Label))}");
+    }
+
+    /// <summary>Clicks a sidebar tab, as a player does, unless it is already on show.</summary>
+    public void ShowTab(SidebarTab tab)
+    {
+        if (Screen.Sidebar.ActiveTab != tab)
+        {
+            var (x, y, width, height) = Screen.Sidebar.TabRect(tab);
+            Click(new Vector2(x + (width / 2), y + (height / 2)));
+            Assert.Equal(tab, Screen.Sidebar.ActiveTab);
+        }
     }
 
     public SidebarEntry Entry(string label) => Screen.Sidebar.Entries.Single(entry => entry.Label == label);

@@ -1,7 +1,10 @@
 ﻿namespace Ashfall.UI.Hud;
 
-/// <summary>One build button: a structure to place or a unit to train, with its current state.</summary>
-public sealed record SidebarEntry(bool IsStructure, int TypeIndex, string Label, int Cost)
+/// <summary>One build cameo: a structure to place or a unit to train, with its current state.</summary>
+/// <param name="Id">The content id, which picks the cameo's icon.</param>
+/// <param name="Label">The short name printed on the cameo.</param>
+/// <param name="Name">The full name, shown when the cameo is hovered.</param>
+public sealed record SidebarEntry(bool IsStructure, int TypeIndex, string Id, string Label, string Name, int Cost, SidebarTab Tab)
 {
     /// <summary>Prerequisites met and a producer (or construction yard) is available.</summary>
     public bool Available { get; set; }
@@ -17,6 +20,6 @@ public sealed record SidebarEntry(bool IsStructure, int TypeIndex, string Label,
     /// <summary>True while this structure is the one being placed.</summary>
     public bool Placing { get; set; }
 
-    /// <summary>Why the button is unavailable, for the tooltip line.</summary>
+    /// <summary>Why the cameo is unavailable, for the tooltip line.</summary>
     public string? Reason { get; set; }
 }

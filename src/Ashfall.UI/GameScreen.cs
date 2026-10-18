@@ -315,6 +315,11 @@ public sealed class GameScreen
             Say("SPEED " + Speeds[_speedIndex].ToString().ToUpperInvariant(), Palette.Text);
         }
 
+        if (input.WasPressed(Key.Tab))
+        {
+            _sidebar.CycleTab(input.Shift ? -1 : 1);
+        }
+
         if (input.WasPressed(Key.H) && HomeCenter() is { } home)
         {
             Camera.CenterOn(home);
@@ -325,13 +330,13 @@ public sealed class GameScreen
             return;
         }
 
-        if (input.WasPressed(Key.A) && HasArmedSelection())
+        if (input.WasPressed(Key.Q) && HasArmedSelection())
         {
             _attackMove = true;
             _placing = -1;
         }
 
-        if (input.WasPressed(Key.S))
+        if (input.WasPressed(Key.X))
         {
             foreach (var unit in MovableSelection())
             {
@@ -368,23 +373,25 @@ public sealed class GameScreen
 
     private void HandleCamera(InputState input)
     {
+        // WASD (GDD section 5), with the arrow keys as well. Ctrl is left alone so Ctrl+digit grouping never pans.
         var pan = Vector2.Zero;
-        if (input.IsHeld(Key.Left))
+        var letters = !input.Control;
+        if (input.IsHeld(Key.Left) || (letters && input.IsHeld(Key.A)))
         {
             pan.X -= 1;
         }
 
-        if (input.IsHeld(Key.Right))
+        if (input.IsHeld(Key.Right) || (letters && input.IsHeld(Key.D)))
         {
             pan.X += 1;
         }
 
-        if (input.IsHeld(Key.Up))
+        if (input.IsHeld(Key.Up) || (letters && input.IsHeld(Key.W)))
         {
             pan.Y -= 1;
         }
 
-        if (input.IsHeld(Key.Down))
+        if (input.IsHeld(Key.Down) || (letters && input.IsHeld(Key.S)))
         {
             pan.Y += 1;
         }
@@ -445,6 +452,12 @@ public sealed class GameScreen
 
         if (!input.WasPressed(MouseButton.Left) || _orders is null)
         {
+            return;
+        }
+
+        if (_sidebar.HitTab(input.Mouse) is { } tab)
+        {
+            _sidebar.ActiveTab = tab;
             return;
         }
 
@@ -923,8 +936,8 @@ public sealed class GameScreen
         // Help and status, bottom-left of the view.
         var scale = _sidebar.Layout.Scale;
         var help = Networked
-            ? "RMB MOVE/ATTACK  A ATTACK-MOVE  S STOP  CTRL+0-9 GROUP  H HOME"
-            : "RMB MOVE/ATTACK  A ATTACK-MOVE  S STOP  CTRL+0-9 GROUP  H HOME  +/- SPEED  P PAUSE";
+            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS"
+            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  +/- SPEED  P PAUSE";
         canvas.TextShadowed(8 * scale, _framebuffer.Y - (14 * scale), help, scale, Palette.TextDim);
         var tick = Simulation.Tick;
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);

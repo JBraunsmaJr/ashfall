@@ -51,7 +51,7 @@ public class PlayableSkirmishTests
 
         ui.Press(Key.D1);
         Assert.Equal(6, ui.Screen.Selection.Count);
-        ui.Press(Key.A);
+        ui.Press(Key.Q);
         Assert.True(ui.Screen.AttackMoveArmed);
         ui.Click(ui.Screen.Camera.WorldToScreen(target));
 

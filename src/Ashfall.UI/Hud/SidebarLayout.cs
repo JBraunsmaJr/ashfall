@@ -19,13 +19,22 @@ public readonly record struct SidebarLayout(float X, float Width, float Height, 
 
     public float MinimapSize => Width - (2 * Padding);
 
-    public float ButtonsY => MinimapY + MinimapSize + (10f * Scale);
+    /// <summary>Top of the tab strip.</summary>
+    public float TabsY => MinimapY + MinimapSize + (8f * Scale);
 
-    public float ButtonHeight => 26f * Scale;
+    public float TabHeight => 22f * Scale;
+
+    /// <summary>Top of the cameo grid, under the tabs.</summary>
+    public float ButtonsY => TabsY + TabHeight + (6f * Scale);
+
+    /// <summary>Cameos per row.</summary>
+    public const int Columns = 2;
 
     public float ButtonGap => 4f * Scale;
 
-    public float HeaderHeight => 18f * Scale;
+    public float ButtonWidth => (Width - (2 * Padding) - ((Columns - 1) * ButtonGap)) / Columns;
+
+    public float ButtonHeight => 64f * Scale;
 
     public static SidebarLayout For(Vector2 framebuffer)
     {

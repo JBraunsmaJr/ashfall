@@ -31,4 +31,8 @@ public enum Key
     Backspace,
     Enter,
     Tab,
+    W,
+    D,
+    Q,
+    X,
 }

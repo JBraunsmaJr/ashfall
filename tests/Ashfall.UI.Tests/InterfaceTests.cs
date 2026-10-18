@@ -93,20 +93,20 @@ public class InterfaceTests
     }
 
     [Fact]
-    public void A_then_click_attack_moves_and_s_stops()
+    public void Q_then_click_attack_moves_and_x_stops()
     {
         var ui = new UiDriver();
         var (a, _) = TwoRiflemen(ui);
         ui.Click(ui.ScreenOf(a));
 
-        ui.Press(Key.A);
+        ui.Press(Key.Q);
         Assert.True(ui.Screen.AttackMoveArmed);
         ui.Click(NearScreen(ui, 6, 6));
         ui.Frame(1);
         Assert.False(ui.Screen.AttackMoveArmed);
         Assert.Equal(OrderKind.AttackMove, ui.Simulation.World.Get<UnitOrder>(a).Kind);
 
-        ui.Press(Key.S);
+        ui.Press(Key.X);
         ui.Frame(1);
         Assert.Equal(OrderKind.Idle, ui.Simulation.World.Get<UnitOrder>(a).Kind);
         Assert.False(ui.Simulation.World.Get<Mover>(a).HasTarget);

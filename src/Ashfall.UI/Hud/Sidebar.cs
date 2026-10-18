@@ -12,18 +12,41 @@ using Ashfall.UI.Text;
 namespace Ashfall.UI.Hud;
 
 /// <summary>
-/// The classic right-hand sidebar (GDD section 5): credits, power bar, radar, then one button per
-/// structure and unit the faction can build. Buttons show cost, progress and queue length, and grey
-/// out with a reason when prerequisites are missing.
+/// The classic right-hand sidebar (GDD section 5): credits, power bar, radar, then build tabs (base, defence,
+/// infantry, vehicles) over a grid of cameos, one per structure or unit in that tab. Cameos show an icon, cost,
+/// progress and queue length, and grey out with a reason when prerequisites are missing. A tab whose cameos have
+/// just become available, or that has something building, is marked so nothing ready goes unnoticed.
 /// </summary>
 public sealed class Sidebar
 {
+    private static readonly SidebarTab[] Tabs = Enum.GetValues<SidebarTab>();
+
     private readonly List<SidebarEntry> _entries = [];
+    private readonly int[] _availableLastUpdate = new int[Tabs.Length];
+    private readonly bool[] _attention = new bool[Tabs.Length];
     private int _faction = -1;
+    private SidebarTab _activeTab;
 
     public IReadOnlyList<SidebarEntry> Entries => _entries;
 
     public SidebarLayout Layout { get; private set; }
+
+    /// <summary>The tab whose cameos are shown. Choosing a tab clears its attention marker.</summary>
+    public SidebarTab ActiveTab
+    {
+        get => _activeTab;
+        set
+        {
+            _activeTab = value;
+            _attention[(int)value] = false;
+        }
+    }
+
+    /// <summary>True when a tab not on show has cameos that became available since it was last looked at.</summary>
+    public bool NeedsAttention(SidebarTab tab) => _attention[(int)tab];
+
+    /// <summary>Moves to the next (or, with a negative step, previous) tab.</summary>
+    public void CycleTab(int step) => ActiveTab = Tabs[(((int)_activeTab + step) % Tabs.Length + Tabs.Length) % Tabs.Length];
 
     /// <summary>Refreshes every button's state from the simulation.</summary>
     public void Update(GameSimulation simulation, int player, Vector2 framebuffer, int placingStructure)
@@ -103,15 +126,25 @@ public sealed class Sidebar
                 entry.Available = producers > 0;
             }
         }
+
+        foreach (var tab in Tabs)
+        {
+            var available = _entries.Count(entry => entry.Tab == tab && entry.Available);
+            if (available > _availableLastUpdate[(int)tab] && tab != _activeTab)
+            {
+                _attention[(int)tab] = true;
+            }
+
+            _availableLastUpdate[(int)tab] = available;
+        }
     }
 
-    /// <summary>The button under <paramref name="point"/>, if any.</summary>
+    /// <summary>The cameo under <paramref name="point"/> in the tab on show, if any.</summary>
     public SidebarEntry? HitTest(Vector2 point)
     {
         for (var i = 0; i < _entries.Count; i++)
         {
-            var (x, y, width, height) = ButtonRect(i);
-            if (point.X >= x && point.X < x + width && point.Y >= y && point.Y < y + height)
+            if (_entries[i].Tab == _activeTab && Inside(point, ButtonRect(i)))
             {
                 return _entries[i];
             }
@@ -119,6 +152,23 @@ public sealed class Sidebar
 
         return null;
     }
+
+    /// <summary>The tab under <paramref name="point"/>, if any.</summary>
+    public SidebarTab? HitTab(Vector2 point)
+    {
+        foreach (var tab in Tabs)
+        {
+            if (Inside(point, TabRect(tab)))
+            {
+                return tab;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool Inside(Vector2 point, (float X, float Y, float Width, float Height) rect) =>
+        point.X >= rect.X && point.X < rect.X + rect.Width && point.Y >= rect.Y && point.Y < rect.Y + rect.Height;
 
     public bool MinimapContains(Vector2 point)
     {
@@ -146,50 +196,151 @@ public sealed class Sidebar
 
         DrawPower(canvas, state, left, right, layout);
 
-        // Buttons.
+        DrawTabs(canvas, layout, simulation, player);
+
         var hovered = HitTest(mouse);
-        var lastWasStructure = true;
+        var team = Palette.Player(player);
         for (var i = 0; i < _entries.Count; i++)
         {
-            var entry = _entries[i];
-            var (x, y, width, height) = ButtonRect(i);
-            if (i == 0 || entry.IsStructure != lastWasStructure)
+            if (_entries[i].Tab == _activeTab)
             {
-                canvas.Text(x, y - layout.HeaderHeight + (3 * layout.Scale), entry.IsStructure ? "STRUCTURES" : "UNITS", layout.Scale, Palette.TextDim);
+                DrawCameo(canvas, layout, _entries[i], ButtonRect(i), team, _entries[i] == hovered);
             }
-
-            lastWasStructure = entry.IsStructure;
-            var background = entry.Placing ? Palette.ButtonActive : entry == hovered && entry.Available ? Palette.ButtonHover : Palette.Button;
-            canvas.Rect(x, y, width, height, background);
-            if (entry.Progress is { } progress)
-            {
-                canvas.Rect(x, y, width * Math.Clamp(progress, 0f, 1f), height, Palette.Progress);
-            }
-
-            var labelColor = entry.Available ? Palette.Text : Palette.TextDim;
-            var labelY = y + ((height - (PixelFont.GlyphHeight * text)) / 2f);
-            var label = entry.Queued > 1 ? entry.Label + " " + "×" + entry.Queued.ToString(CultureInfo.InvariantCulture) : entry.Label;
-            canvas.Text(x + (5 * layout.Scale), labelY, label, text, labelColor);
-            canvas.TextRight(x + width - (5 * layout.Scale), labelY, "$" + entry.Cost.ToString(CultureInfo.InvariantCulture), text,
-                !entry.Available ? Palette.TextDim : entry.Affordable ? Palette.Credits : Palette.TextWarn);
         }
 
-        // Status line: the hovered button's reason, or the screen's own message.
-        var footer = hovered is { Available: false, Reason: { } reason } ? reason : status;
-        if (!string.IsNullOrEmpty(footer))
+        // Footer: the hovered cameo's full name and cost, and why it is unavailable; otherwise the screen's message.
+        var footerScale = layout.Scale * 1.5f;
+        var lineHeight = (PixelFont.GlyphHeight + 3) * footerScale;
+        var bottom = layout.Height - layout.Padding - (PixelFont.GlyphHeight * footerScale);
+        if (hovered is not null)
         {
-            canvas.Text(left, layout.Height - layout.Padding - (PixelFont.GlyphHeight * layout.Scale * 1.5f), footer, layout.Scale * 1.5f, Palette.TextDim);
+            var reason = hovered.Available ? null : hovered.Reason;
+            var nameY = reason is null ? bottom : bottom - lineHeight;
+            canvas.Text(left, nameY, hovered.Name.ToUpperInvariant(), footerScale, Palette.Text);
+            canvas.TextRight(right, nameY, "$" + hovered.Cost.ToString(CultureInfo.InvariantCulture), footerScale,
+                hovered.Affordable ? Palette.Credits : Palette.TextWarn);
+            if (reason is not null)
+            {
+                canvas.Text(left, bottom, reason, footerScale, Palette.TextWarn);
+            }
+        }
+        else if (!string.IsNullOrEmpty(status))
+        {
+            canvas.Text(left, bottom, status, footerScale, Palette.TextDim);
         }
     }
 
+    /// <summary>Where cameo <paramref name="index"/> sits in its tab's grid (whether or not its tab is on show).</summary>
     public (float X, float Y, float Width, float Height) ButtonRect(int index)
     {
         var layout = Layout;
-        var structures = _entries.Count(entry => entry.IsStructure);
-        var group = index < structures ? 0 : 1;
-        var y = layout.ButtonsY + layout.HeaderHeight + (index * (layout.ButtonHeight + layout.ButtonGap)) + (group * (layout.HeaderHeight + (4 * layout.Scale)));
-        return (layout.X + layout.Padding, y, layout.Width - (2 * layout.Padding), layout.ButtonHeight);
+        var tab = _entries[index].Tab;
+        var slot = 0;
+        for (var i = 0; i < index; i++)
+        {
+            slot += _entries[i].Tab == tab ? 1 : 0;
+        }
+
+        var column = slot % SidebarLayout.Columns;
+        var row = slot / SidebarLayout.Columns;
+        return (
+            layout.X + layout.Padding + (column * (layout.ButtonWidth + layout.ButtonGap)),
+            layout.ButtonsY + (row * (layout.ButtonHeight + layout.ButtonGap)),
+            layout.ButtonWidth,
+            layout.ButtonHeight);
     }
+
+    /// <summary>Where a tab's header sits in the strip above the cameos.</summary>
+    public (float X, float Y, float Width, float Height) TabRect(SidebarTab tab)
+    {
+        var layout = Layout;
+        var gap = 2f * layout.Scale;
+        var width = (layout.Width - (2 * layout.Padding) - ((Tabs.Length - 1) * gap)) / Tabs.Length;
+        return (layout.X + layout.Padding + ((int)tab * (width + gap)), layout.TabsY, width, layout.TabHeight);
+    }
+
+    private void DrawTabs(Canvas canvas, SidebarLayout layout, GameSimulation simulation, int player)
+    {
+        var scale = layout.Scale;
+        foreach (var tab in Tabs)
+        {
+            var (x, y, width, height) = TabRect(tab);
+            var active = tab == _activeTab;
+            canvas.Rect(x, y, width, height, active ? Palette.ButtonHover : Palette.Button);
+            if (active)
+            {
+                canvas.Rect(x, y, width, 2 * scale, Palette.Player(player));
+            }
+
+            var any = _entries.Any(entry => entry.Tab == tab && entry.Available);
+            var label = TabLabel(tab);
+            var labelColor = active ? Palette.Text : any ? Palette.TextDim : Palette.Scale(Palette.TextDim, 0.6f);
+            canvas.TextCentered(x + (width / 2f), y + ((height - (PixelFont.GlyphHeight * scale)) / 2f) + scale, label, scale, labelColor);
+
+            // Something building in this tab: a thin bar along the tab's foot, as far along as the furthest item.
+            var progress = _entries.Where(entry => entry.Tab == tab && entry.Progress is not null).Select(entry => entry.Progress!.Value).DefaultIfEmpty(-1f).Max();
+            if (progress >= 0f)
+            {
+                canvas.Rect(x, y + height - (2 * scale), width * Math.Clamp(progress, 0f, 1f), 2 * scale, Palette.Progress);
+            }
+
+            if (_attention[(int)tab] && !active)
+            {
+                var pulse = 0.55f + (0.45f * MathF.Sin(simulation.Tick * 0.6f));
+                canvas.Disc(new Vector2(x + width - (5 * scale), y + (5 * scale)), 2.5f * scale, 2.5f * scale, Palette.WithAlpha(Palette.TextGood, pulse));
+            }
+        }
+    }
+
+    private static void DrawCameo(Canvas canvas, SidebarLayout layout, SidebarEntry entry, (float X, float Y, float Width, float Height) rect, LinearColor team, bool hovered)
+    {
+        var (x, y, width, height) = rect;
+        var scale = layout.Scale;
+        canvas.Rect(x, y, width, height, entry.Placing ? Palette.ButtonActive : hovered && entry.Available ? Palette.ButtonHover : Palette.Button);
+
+        // The icon fills the cameo above the caption strip.
+        var caption = (PixelFont.GlyphHeight + 4) * scale;
+        CameoIcons.Draw(canvas, entry.Id, x + (3 * scale), y + (3 * scale), width - (6 * scale), height - caption - (3 * scale), team, dim: !entry.Available);
+
+        // Building: the part still to come is shaded, the classic wipe, with a bar along the icon's foot.
+        if (entry.Progress is { } progress)
+        {
+            var done = Math.Clamp(progress, 0f, 1f);
+            canvas.Rect(x, y, width, (height - caption) * (1f - done), new LinearColor(0f, 0f, 0f, 0.5f));
+            canvas.Rect(x, y + height - caption - (2 * scale), width * done, 2 * scale, Palette.Progress);
+        }
+
+        var captionY = y + height - caption + (2 * scale);
+        canvas.Rect(x, y + height - caption, width, caption, new LinearColor(0f, 0f, 0f, 0.35f));
+        canvas.Text(x + (3 * scale), captionY, entry.Label, scale, entry.Available ? Palette.Text : Palette.TextDim);
+        canvas.TextRight(x + width - (3 * scale), captionY, "$" + entry.Cost.ToString(CultureInfo.InvariantCulture), scale,
+            !entry.Available ? Palette.TextDim : entry.Affordable ? Palette.Credits : Palette.TextWarn);
+
+        if (entry.Queued > 1)
+        {
+            var count = entry.Queued.ToString(CultureInfo.InvariantCulture);
+            var badge = PixelFont.Measure(count, 2 * scale) + (4 * scale);
+            canvas.Rect(x + width - badge - (2 * scale), y + (2 * scale), badge, (PixelFont.GlyphHeight + 4) * scale, new LinearColor(0f, 0f, 0f, 0.6f));
+            canvas.Text(x + width - badge, y + (4 * scale), count, 2 * scale, Palette.Credits);
+        }
+
+        if (entry.Placing)
+        {
+            canvas.Frame(x, y, width, height, 2 * scale, Palette.Selection);
+        }
+        else if (hovered)
+        {
+            canvas.Frame(x, y, width, height, scale, Palette.PanelEdge);
+        }
+    }
+
+    private static string TabLabel(SidebarTab tab) => tab switch
+    {
+        SidebarTab.Base => "BASE",
+        SidebarTab.Defence => "DEFENCE",
+        SidebarTab.Infantry => "INFANTRY",
+        _ => "VEHICLES",
+    };
 
     private static void DrawPower(Canvas canvas, PlayerState state, float left, float right, SidebarLayout layout)
     {
@@ -220,7 +371,8 @@ public sealed class Sidebar
             var structure = content.Structure(index);
             if (structure.Role != StructureRole.ConstructionYard)
             {
-                _entries.Add(new SidebarEntry(true, index, ShortName(structure.Name), structure.Cost));
+                var tab = structure.Role == StructureRole.Wall ? SidebarTab.Defence : SidebarTab.Base;
+                _entries.Add(new SidebarEntry(true, index, id, ShortName(structure.Name), structure.Name, structure.Cost, tab));
             }
         }
 
@@ -228,7 +380,8 @@ public sealed class Sidebar
         {
             var index = content.UnitIndex(id);
             var unit = content.Unit(index);
-            _entries.Add(new SidebarEntry(false, index, ShortName(unit.Name), unit.Cost));
+            var tab = unit.ProducedBy == StructureRole.Barracks ? SidebarTab.Infantry : SidebarTab.Vehicles;
+            _entries.Add(new SidebarEntry(false, index, id, ShortName(unit.Name), unit.Name, unit.Cost, tab));
         }
     }
 
