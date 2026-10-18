@@ -10,6 +10,7 @@ public sealed class InputState
 {
     private readonly HashSet<Key> _held = [];
     private readonly HashSet<Key> _pressed = [];
+    private readonly System.Text.StringBuilder _typed = new();
 
     /// <summary>Mouse position in framebuffer pixels, origin top-left.</summary>
     public Vector2 Mouse { get; set; }
@@ -31,6 +32,9 @@ public sealed class InputState
 
     /// <summary>Seconds since the screen started; used for double-taps.</summary>
     public double Time { get; set; }
+
+    /// <summary>Text typed this frame (characters and pastes), for text fields.</summary>
+    public string TypedText => _typed.ToString();
 
     public bool Shift => _held.Contains(Key.Shift);
 
@@ -61,6 +65,18 @@ public sealed class InputState
         }
     }
 
+    /// <summary>Counts a held key as pressed again (keyboard auto-repeat, e.g. holding Backspace).</summary>
+    public void RepeatKey(Key key)
+    {
+        if (_held.Contains(key))
+        {
+            _pressed.Add(key);
+        }
+    }
+
+    /// <summary>Adds typed characters for this frame.</summary>
+    public void Type(string text) => _typed.Append(text);
+
     public void SetButton(MouseButton button, bool down)
     {
         if (down && (ButtonsDown & button) == 0)
@@ -79,6 +95,7 @@ public sealed class InputState
     public void EndFrame()
     {
         _pressed.Clear();
+        _typed.Clear();
         ButtonsPressed = MouseButton.None;
         ButtonsReleased = MouseButton.None;
         Scroll = 0;

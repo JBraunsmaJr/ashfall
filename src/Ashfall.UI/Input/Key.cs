@@ -28,4 +28,7 @@ public enum Key
     Minus,
     Shift,
     Control,
+    Backspace,
+    Enter,
+    Tab,
 }

@@ -11,6 +11,12 @@ internal sealed record ClientOptions
 
         Usage: ashfall [options]
 
+        With no options the main menu opens: skirmish, host a game or join one by address.
+        Options that only make sense for a skirmish (--seed, --opponent, --frames, --screenshot, ...)
+        start one directly; --menu shows the menu anyway.
+
+          --menu                 Open the main menu even with other options given
+          --skirmish             Start a skirmish directly, skipping the menu
           --seed <n>             Match seed (default 20261017)
           --opponent <ai>        scripted (default): the M1 AI builds, trains and attacks
                                  idle: a dummy opponent that never acts (learn the controls)
@@ -41,7 +47,7 @@ internal sealed record ClientOptions
         In game: left-click selects (drag for a box), right-click moves or attacks, A then click
         attack-moves, S stops, Ctrl+0-9 stores a control group and 0-9 recalls it (twice to jump),
         arrows / screen edges / middle-drag scroll, mouse wheel zooms, H centres on your base,
-        +/- change speed, P pauses, Esc cancels (and leaves once the match is over).
+        +/- change speed, P pauses, Esc cancels; Esc twice with nothing to cancel leaves the match.
         """;
 
     public ulong Seed { get; init; } = ProvingGround.DefaultSeed;
@@ -94,6 +100,22 @@ internal sealed record ClientOptions
 
     public bool IsNetwork => Host || Join is not null || Rejoin is not null;
 
+    public bool Menu { get; init; }
+
+    public bool Skirmish { get; init; }
+
+    /// <summary>--name was given (it overrides the name the menu remembered).</summary>
+    public bool NameGiven { get; init; }
+
+    /// <summary>--seed was given (otherwise a hosted game picks a random seed).</summary>
+    public bool SeedGiven { get; init; }
+
+    /// <summary>Set by options that describe a skirmish, so it starts without the menu.</summary>
+    private bool SkirmishImplied { get; init; }
+
+    /// <summary>Whether the client opens on the main menu rather than going straight into a mode.</summary>
+    public bool StartsInMenu => Menu || (!IsNetwork && !Skirmish && !SkirmishImplied);
+
     public MatchSpec ToSpec()
     {
         var spec = MatchSpec.Skirmish(Seed);
@@ -123,10 +145,16 @@ internal sealed record ClientOptions
                     options = options with { VSync = false };
                     continue;
                 case "--spectate":
-                    options = options with { Spectate = true };
+                    options = options with { Spectate = true, SkirmishImplied = true };
                     continue;
                 case "--autopilot":
-                    options = options with { Autopilot = true };
+                    options = options with { Autopilot = true, SkirmishImplied = true };
+                    continue;
+                case "--menu":
+                    options = options with { Menu = true };
+                    continue;
+                case "--skirmish":
+                    options = options with { Skirmish = true };
                     continue;
                 case "--host":
                     options = options with { Host = true };
@@ -143,25 +171,25 @@ internal sealed record ClientOptions
             switch (name)
             {
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
-                    options = options with { Seed = seed };
+                    options = options with { Seed = seed, SeedGiven = true, SkirmishImplied = true };
                     break;
                 case "--opponent" when value is "scripted" or "idle":
-                    options = options with { Opponent = value == "idle" ? PlayerController.IdleAi : PlayerController.ScriptedAi };
+                    options = options with { Opponent = value == "idle" ? PlayerController.IdleAi : PlayerController.ScriptedAi, SkirmishImplied = true };
                     break;
                 case "--speed" when GameSpeed.TryParse(value, out var speed):
                     options = options with { Speed = speed };
                     break;
                 case "--frames" when long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var frames):
-                    options = options with { Frames = frames };
+                    options = options with { Frames = frames, SkirmishImplied = true };
                     break;
                 case "--until-tick" when long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var tick):
-                    options = options with { UntilTick = tick };
+                    options = options with { UntilTick = tick, SkirmishImplied = true };
                     break;
                 case "--screenshot" when value.Length > 0:
-                    options = options with { Screenshot = value };
+                    options = options with { Screenshot = value, SkirmishImplied = true };
                     break;
                 case "--look-at" when TryParsePoint(value, out var point):
-                    options = options with { LookAt = point };
+                    options = options with { LookAt = point, SkirmishImplied = true };
                     break;
                 case "--record" when value.Length > 0:
                     options = options with { Record = value };
@@ -182,7 +210,7 @@ internal sealed record ClientOptions
                     options = options with { Port = port };
                     break;
                 case "--name" when value.Length > 0:
-                    options = options with { Name = value };
+                    options = options with { Name = value, NameGiven = true };
                     break;
                 case "--zoom" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var zoom) && zoom <= 2:
                     options = options with { Zoom = zoom };

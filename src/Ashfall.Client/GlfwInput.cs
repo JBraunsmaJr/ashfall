@@ -16,9 +16,32 @@ internal sealed class GlfwInput
         window.OnKey += (_, key, _, action, _) =>
         {
             var mapped = Map(key);
-            if (mapped != Key.None && action != GlfwKeyAction.Repeat)
+            if (mapped == Key.None)
+            {
+                // Ctrl+V pastes into whichever text field has focus.
+                if (key == GlfwKey.V && action == GlfwKeyAction.Press && State.Control && Glfw.Clipboard is { } clipboard)
+                {
+                    State.Type(clipboard);
+                }
+            }
+            else if (action == GlfwKeyAction.Repeat)
+            {
+                if (mapped == Key.Backspace)
+                {
+                    State.RepeatKey(mapped);
+                }
+            }
+            else
             {
                 State.SetKey(mapped, action == GlfwKeyAction.Press);
+            }
+        };
+        window.OnChar += (_, codepoint) =>
+        {
+            // The pixel font is ASCII; anything else would print as a box.
+            if (codepoint is >= 32 and < 127)
+            {
+                State.Type(((char)codepoint).ToString());
             }
         };
         window.OnMouseButton += (_, button, action, _) =>
@@ -70,6 +93,9 @@ internal sealed class GlfwInput
         GlfwKey.Minus or GlfwKey.KpSubtract => Key.Minus,
         GlfwKey.LeftShift or GlfwKey.RightShift => Key.Shift,
         GlfwKey.LeftControl or GlfwKey.RightControl => Key.Control,
+        GlfwKey.Backspace => Key.Backspace,
+        GlfwKey.Enter or GlfwKey.KpEnter => Key.Enter,
+        GlfwKey.Tab => Key.Tab,
         _ => Key.None,
     };
 }

@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Numerics;
 using Ashfall.Core;
 using Ashfall.Networking.Transport;
@@ -18,10 +19,25 @@ internal static class MultiplayerClient
 {
     public const int DefaultPort = 47600;
 
-    public static int Run(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options)
+    /// <summary>Runs the lobby and match; the result says why it ended when that was a failure (for the menu to show).</summary>
+    public static MultiplayerResult Run(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options)
     {
         var port = options.Port ?? (options.Host ? DefaultPort : 0);
-        var transport = new ReliableTransport(new UdpDatagramSocket(port));
+        UdpDatagramSocket socket;
+        try
+        {
+            socket = new UdpDatagramSocket(port);
+        }
+        catch (SocketException e)
+        {
+            var reason = e.SocketErrorCode == SocketError.AddressAlreadyInUse
+                ? string.Create(CultureInfo.InvariantCulture, $"UDP port {port} is already in use (another Ashfall running?). Pick another port.")
+                : string.Create(CultureInfo.InvariantCulture, $"Could not open UDP port {port}: {e.Message}");
+            Console.Error.WriteLine(reason);
+            return new MultiplayerResult(1, reason);
+        }
+
+        var transport = new ReliableTransport(socket);
         var identity = NetworkIdentity.LoadOrCreate(NetworkIdentity.DefaultPath, options.Name);
         var networkOptions = new NetworkOptions { Speed = GameSpeed.RealTime, Bot = options.Autopilot };
         using var session = options.Host
@@ -37,6 +53,7 @@ internal static class MultiplayerClient
         var clock = Stopwatch.StartNew();
         var lastFrame = TimeSpan.Zero;
         var waitingSince = (TimeSpan?)null;
+        input.State.EndFrame();
 
         while (!window.ShouldClose)
         {
@@ -54,6 +71,10 @@ internal static class MultiplayerClient
             var framebuffer = new Vector2(window.FramebufferSize.X, window.FramebufferSize.Y);
 
             session.Update();
+            if (session.State == SessionState.Failed)
+            {
+                break;
+            }
 
             if (session.Match is { } match && session.State is SessionState.Playing or SessionState.Ended or SessionState.Desynced)
             {
@@ -134,19 +155,13 @@ internal static class MultiplayerClient
                 $"Left at tick {final.Tick} ({session.State}), state {StateHasher.Format(final.Simulation.ComputeStateHash())}."));
         }
 
-        return session.State == SessionState.Failed ? 1 : 0;
+        return session.State == SessionState.Failed
+            ? new MultiplayerResult(1, session.Error ?? "The connection failed.")
+            : new MultiplayerResult(0, null);
     }
 
-    private static float TickAlpha(HeadlessMatch match)
-    {
-        var speed = match.Clock.Speed;
-        if (speed.IsUnthrottled)
-        {
-            return 1f;
-        }
-
-        var tick = speed.DueOffset(1);
-        var remaining = match.Clock.TimeUntilDue(match.Tick);
-        return tick <= TimeSpan.Zero ? 1f : Math.Clamp(1f - (float)(remaining / tick), 0f, 1f);
-    }
+    private static float TickAlpha(HeadlessMatch match) => SkirmishClient.TickAlpha(match);
 }
+
+/// <summary>How a multiplayer session ended: a process exit code, and a reason when it failed.</summary>
+internal sealed record MultiplayerResult(int ExitCode, string? Message);

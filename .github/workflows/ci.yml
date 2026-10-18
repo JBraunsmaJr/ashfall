@@ -121,6 +121,18 @@ jobs:
           fi
           grep -q "Presented 300 frames" render.log
 
+      - name: Render the main menu with validation
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- \
+              --menu --frames 60 --validation --screenshot render-menu.png 2>&1 | tee menu.log
+          if grep -q "Validation Error" menu.log; then
+            echo "::error::Vulkan validation reported errors (see menu.log above)."
+            exit 1
+          fi
+          test -s render-menu.png
+
       - name: Render a battle (autopilot, six game minutes) with validation
         shell: bash
         run: |

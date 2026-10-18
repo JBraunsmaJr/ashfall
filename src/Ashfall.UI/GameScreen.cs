@@ -62,6 +62,9 @@ public sealed class GameScreen
     private Entity _lastSite = Entity.None;
     private int _ownUnitsLastTick = -1;
     private readonly Dictionary<Entity, int> _structureHealth = [];
+    private double _leaveArmedUntil = double.MinValue;
+
+    private const double LeaveConfirmSeconds = 3;
 
     public GameScreen(HeadlessMatch match)
         : this(match, match?.LocalPlayer, networked: false)
@@ -113,7 +116,7 @@ public sealed class GameScreen
     /// <summary>A line shown across the middle of the view, e.g. "WAITING FOR ANA" (set by the client each frame).</summary>
     public string? Overlay { get; set; }
 
-    /// <summary>Set when the player asks to leave (Esc after the match ends).</summary>
+    /// <summary>Set when the player asks to leave: Esc once the match is over, or Esc twice with nothing to cancel.</summary>
     public bool ExitRequested { get; private set; }
 
     /// <summary>The structure type being placed, or -1.</summary>
@@ -250,9 +253,19 @@ public sealed class GameScreen
                 _placing = -1;
                 _attackMove = false;
             }
-            else
+            else if (_selection.Count > 0)
             {
                 Select([]);
+            }
+            else if (_now <= _leaveArmedUntil)
+            {
+                ExitRequested = true;
+            }
+            else
+            {
+                // Nothing left to cancel: a second Esc within a few seconds leaves the match.
+                _leaveArmedUntil = _now + LeaveConfirmSeconds;
+                Say("PRESS ESC AGAIN TO LEAVE THE MATCH", Palette.Credits);
             }
         }
 
