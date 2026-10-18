@@ -3,7 +3,8 @@
 namespace Ashfall.Content;
 
 /// <summary>
-/// The Bulwark Directorate's M1 roster: enough to play a full match (economy, infantry, armour).
+/// The Bulwark Directorate's roster: the M1 core (economy, infantry, armour) plus the M5 answers to the Maw, the
+/// Pyro's area flame and the Wall.
 /// Numbers are starting values for balancing, not final. Speeds are cells per tick (15 ticks per second).
 /// </summary>
 public static class BulwarkContent
@@ -15,17 +16,23 @@ public static class BulwarkContent
     public const string Refinery = "bulwark.refinery";
     public const string Barracks = "bulwark.barracks";
     public const string Factory = "bulwark.factory";
+    public const string Wall = "bulwark.wall";
 
     public const string Rifleman = "bulwark.rifleman";
     public const string Rocketeer = "bulwark.rocketeer";
     public const string Warden = "bulwark.warden";
     public const string Harvester = "bulwark.harvester";
+    public const string Pyro = "bulwark.pyro";
 
     public static GameContent Create()
     {
         var rifle = new WeaponDefinition("bulwark.rifle", Warhead.SmallArms, Damage: 15, Range: Fix64.FromInt(4), CooldownTicks: 15);
         var rocket = new WeaponDefinition("bulwark.rocket", Warhead.AntiArmour, Damage: 45, Range: Fix64.FromInt(5), CooldownTicks: 45);
         var cannon = new WeaponDefinition("bulwark.cannon", Warhead.AntiArmour, Damage: 40, Range: Fix64.FromInt(5), CooldownTicks: 30);
+
+        // Short, fast and wide: each burst scorches everything within a cell of its target. The answer to chaff.
+        var flamer = new WeaponDefinition("bulwark.flamer", Warhead.Flame, Damage: 10, Range: Fix64.FromInt(3), CooldownTicks: 9,
+            SplashRadius: Fix64.One);
 
         // 1.2 cells per second for infantry and harvesters, 1.8 for the Warden tank.
         var infantrySpeed = Fix64.FromRatio(2, 25);
@@ -41,6 +48,10 @@ public static class BulwarkContent
                 AcquisitionRange: Fix64.FromInt(7), StructureRole.Factory, Sight: 7),
             new(Harvester, "Harvester", Cost: 1_400, BuildTicks: 210, Health: 700, ArmorType.Heavy, infantrySpeed, Weapon: null,
                 AcquisitionRange: Fix64.Zero, StructureRole.Factory, HarvestCapacity: 700, Sight: 4),
+
+            // Appended: unit indices are part of the replay format.
+            new(Pyro, "Pyro", Cost: 250, BuildTicks: 120, Health: 110, ArmorType.None, infantrySpeed, flamer,
+                AcquisitionRange: Fix64.FromInt(5), StructureRole.Barracks, Sight: 5),
         ];
 
         StructureDefinition[] structures =
@@ -55,13 +66,17 @@ public static class BulwarkContent
                 Width: 2, Height: 2, Power: -20, Prerequisites: [StructureRole.PowerPlant]),
             new(Factory, "War Factory", StructureRole.Factory, Cost: 2_000, BuildTicks: 300, Health: 1_000,
                 Width: 3, Height: 3, Power: -40, Prerequisites: [StructureRole.Refinery]),
+
+            // Appended. Cheap and quick so a line goes up between waves; the swarm has to chew through it.
+            new(Wall, "Wall", StructureRole.Wall, Cost: 50, BuildTicks: 15, Health: 400,
+                Width: 1, Height: 1, Power: 0, Prerequisites: [StructureRole.Barracks], Sight: 0),
         ];
 
         FactionDefinition[] factions =
         [
             new(FactionId, "Bulwark Directorate", ConstructionYard,
-                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory],
-                UnitIds: [Rifleman, Rocketeer, Warden, Harvester]),
+                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory, Wall],
+                UnitIds: [Rifleman, Rocketeer, Warden, Harvester, Pyro]),
         ];
 
         return new GameContent(units, structures, factions, new EconomyRules());

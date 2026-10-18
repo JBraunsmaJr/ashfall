@@ -1,10 +1,10 @@
 ﻿using Ashfall.Simulation.Components;
-
+using Ashfall.Content;
 namespace Ashfall.Simulation.Systems;
 
 /// <summary>
-/// Default victory condition (GDD section 2): a player with no structures left is defeated; the match is
-/// over when at most one team still has an undefeated player.
+/// Default victory condition (GDD section 2): a player with no structures left (walls do not count) is defeated;
+/// the match is over when at most one team still has an undefeated player.
 /// </summary>
 public sealed class VictorySystem : ISystem
 {
@@ -31,7 +31,8 @@ public sealed class VictorySystem : ISystem
         foreach (var index in structures.EntityIndices)
         {
             var owner = owners.Get(index).PlayerId;
-            if (owner >= 0 && owner < _structureCounts.Length && !context.World.Store<Health>().Get(index).IsDead)
+            if (owner >= 0 && owner < _structureCounts.Length && !context.World.Store<Health>().Get(index).IsDead
+                && context.Content.Structure(structures.Get(index).StructureType).Role != StructureRole.Wall)
             {
                 _structureCounts[owner]++;
             }

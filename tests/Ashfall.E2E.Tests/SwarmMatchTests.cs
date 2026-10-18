@@ -27,7 +27,8 @@ public class SwarmMatchTests
         var simulation = match.Simulation;
         var (structures, defenders) = SwarmFortress.Survivors(simulation, player: 0);
         Assert.Equal(8, structures);
-        Assert.Equal(3 * SwarmFortress.DefendersPerKind, defenders);
+        Assert.Equal((3 * SwarmFortress.DefendersPerKind) + SwarmFortress.Pyros, defenders);
+        Assert.Equal((SwarmFortress.WallRadius * 8) - (4 * SwarmFortress.GateWidth), SwarmFortress.Walls(simulation, player: 0));
         Assert.False(simulation.VictoryEnabled);
 
         await match.RunTicksAsync(30, TestContext.Current.CancellationToken);

@@ -188,6 +188,16 @@ public sealed class GameContent
             hasher.Add((int)structure.Armor);
         }
 
+        foreach (var unit in Units)
+        {
+            hasher.Add(unit.Weapon?.SplashRadius ?? Fix64.Zero);
+        }
+
+        foreach (var creature in Creatures)
+        {
+            hasher.Add(creature.Weapon.SplashRadius);
+        }
+
         foreach (var nest in Nests)
         {
             hasher.Add(nest.StructureId);

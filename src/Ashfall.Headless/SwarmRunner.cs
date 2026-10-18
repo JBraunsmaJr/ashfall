@@ -120,7 +120,7 @@ internal static class SwarmRunner
             return string.Create(
                 CultureInfo.InvariantCulture,
                 $" creatures={simulation.World.Store<Creature>().Count} peak={maw.PeakAlive} spawned={maw.Spawned} killed={maw.Killed}{breeding}" +
-                $" fortress: structures={structures} defenders={units} {(FellAt < 0 ? "held" : $"fell at tick {FellAt}")}" +
+                $" fortress: structures={structures} walls={SwarmFortress.Walls(simulation, player: 0)} defenders={units} {(FellAt < 0 ? "held" : $"fell at tick {FellAt}")}" +
                 $" tick-ms: mean={Stats.Mean:F2} p95={Stats.P95:F2} max={Stats.Max:F2}" +
                 $" fighting: mean={Fighting.Mean:F2} p95={Fighting.P95:F2} max={Fighting.Max:F2}");
         }

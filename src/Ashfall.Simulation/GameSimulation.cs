@@ -641,12 +641,12 @@ public sealed class GameSimulation
         var infos = structures.Components;
         for (var i = 0; i < infos.Length; i++)
         {
-            if (owners.Get(indices[i]).PlayerId != playerId)
+            var other = Content.Structure(infos[i].StructureType);
+            if (owners.Get(indices[i]).PlayerId != playerId || other.Role == StructureRole.Wall)
             {
-                continue;
+                continue; // walls hold a line; they do not stretch the base
             }
 
-            var other = Content.Structure(infos[i].StructureType);
             var gapX = Gap(origin.X, width, infos[i].Origin.X, other.Width);
             var gapY = Gap(origin.Y, height, infos[i].Origin.Y, other.Height);
             if (gapX <= radius && gapY <= radius)

@@ -6,8 +6,8 @@ namespace Ashfall.Session.Maps;
 
 /// <summary>
 /// The horde stress test's battlefield: an open square map with a Bulwark fortress in the middle — a Construction
-/// Yard ringed by power plants and production, and 120 idle defenders (riflemen, rocketeers and Warden tanks) that
-/// open fire on whatever comes in range. The Maw arrives from every edge. Everything is placed by fixed rules, so
+/// Yard ringed by power plants and production, a wall ring with a gate on each side, and 152 idle defenders (Pyros
+/// inside the wall, then riflemen, rocketeers and Warden tanks) that open fire on whatever comes in range. The Maw arrives from every edge. Everything is placed by fixed rules, so
 /// the setup is identical on every machine.
 /// </summary>
 public static class SwarmFortress
@@ -17,6 +17,15 @@ public static class SwarmFortress
 
     /// <summary>Defenders per kind (rifleman, rocketeer, Warden).</summary>
     public const int DefendersPerKind = 40;
+
+    /// <summary>Pyros on the inside of the wall, where the swarm piles up.</summary>
+    public const int Pyros = 32;
+
+    /// <summary>Radius of the square wall ring around the fortress, in cells.</summary>
+    public const int WallRadius = 17;
+
+    /// <summary>Width of the gate left open in the middle of each side of the wall ring, in cells.</summary>
+    public const int GateWidth = 3;
 
     public static GridMap Create() => new(Size, Size);
 
@@ -39,6 +48,27 @@ public static class SwarmFortress
         simulation.PlaceStructure(player, content.StructureIndex(BulwarkContent.Barracks), new Cell(middle - 1, middle - 9));
         simulation.PlaceStructure(player, content.StructureIndex(BulwarkContent.Factory), new Cell(middle - 1, middle + 7));
         simulation.PlaceStructure(player, content.StructureIndex(BulwarkContent.Refinery), new Cell(middle - 8, middle - 1));
+
+        // A wall ring with a gate in the middle of each side, so the swarm either chews through or funnels into
+        // the gates, where the flame is.
+        var wall = content.StructureIndex(BulwarkContent.Wall);
+        for (var step = 0; step < WallRadius * 8; step++)
+        {
+            var (dx, dy) = PointOnRing(WallRadius, step);
+            var gate = (Math.Abs(dy) == WallRadius && Math.Abs(dx) <= GateWidth / 2)
+                || (Math.Abs(dx) == WallRadius && Math.Abs(dy) <= GateWidth / 2);
+            if (!gate)
+            {
+                simulation.PlaceStructure(player, wall, new Cell(middle + dx, middle + dy));
+            }
+        }
+
+        var pyro = content.UnitIndex(BulwarkContent.Pyro);
+        for (var i = 0; i < Pyros; i++)
+        {
+            var (dx, dy) = PointOnRing(WallRadius - 2, i * ((WallRadius - 2) * 8) / Pyros);
+            simulation.SpawnUnit(player, pyro, new Cell(middle + dx, middle + dy).Center);
+        }
 
         // Defenders in three rings, outermost first: riflemen, then rocketeers, then Wardens closest to the yard.
         string[] kinds = [BulwarkContent.Rifleman, BulwarkContent.Rocketeer, BulwarkContent.Warden];
@@ -115,16 +145,34 @@ public static class SwarmFortress
         }
     }
 
-    /// <summary>The fortress's player's structures and units still standing.</summary>
+    /// <summary>The fortress's wall segments still standing.</summary>
+    public static int Walls(GameSimulation simulation, int player)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        var owners = simulation.World.Store<Simulation.Components.Owner>();
+        var infos = simulation.World.Store<Simulation.Components.StructureInfo>();
+        var walls = 0;
+        foreach (var index in infos.EntityIndices)
+        {
+            var isWall = simulation.Content.Structure(infos.Get(index).StructureType).Role == StructureRole.Wall;
+            walls += owners.Get(index).PlayerId == player && isWall ? 1 : 0;
+        }
+
+        return walls;
+    }
+
+    /// <summary>The fortress's player's buildings (walls not counted) and units still standing.</summary>
     public static (int Structures, int Units) Survivors(GameSimulation simulation, int player)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         var world = simulation.World;
         var owners = world.Store<Simulation.Components.Owner>();
+        var infos = world.Store<Simulation.Components.StructureInfo>();
         var structures = 0;
-        foreach (var index in world.Store<Simulation.Components.StructureInfo>().EntityIndices)
+        foreach (var index in infos.EntityIndices)
         {
-            structures += owners.Get(index).PlayerId == player ? 1 : 0;
+            var isWall = simulation.Content.Structure(infos.Get(index).StructureType).Role == StructureRole.Wall;
+            structures += owners.Get(index).PlayerId == player && !isWall ? 1 : 0;
         }
 
         var units = 0;
