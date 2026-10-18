@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using Ashfall.Content;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
@@ -6,13 +7,15 @@ using Ashfall.Simulation.Ecs;
 namespace Ashfall.UI.World;
 
 /// <summary>
-/// Remembers where every unit was on the previous tick and the current one, so frames between ticks
-/// can interpolate smoothly, and turns tick-to-tick changes into visual events: shots fired, units and
-/// structures destroyed. Presentation only: it reads the simulation, never writes to it.
+/// Remembers where every unit and Maw creature was on the previous tick and the current one, so frames between
+/// ticks can interpolate smoothly, and turns tick-to-tick changes into visual events: shots fired (units' weapons
+/// and creatures' ranged attacks), and units, creatures and structures destroyed. Presentation only: it reads the
+/// simulation, never writes to it.
 /// </summary>
 internal sealed class MotionTracker
 {
     private readonly Dictionary<Entity, Track> _tracks = [];
+    private readonly HashSet<Entity> _creatures = [];
     private readonly Dictionary<Entity, (Vector2 Center, float Size)> _structures = [];
     private readonly List<Entity> _gone = [];
 
@@ -26,19 +29,15 @@ internal sealed class MotionTracker
         var world = simulation.World;
         foreach (var index in world.Store<UnitInfo>().EntityIndices)
         {
+            Follow(simulation, world.EntityAt(index), index);
+        }
+
+        foreach (var index in world.Store<Creature>().EntityIndices)
+        {
             var entity = world.EntityAt(index);
-            var position = ToVector(world.Store<Position>().Get(index).Value);
-            if (_tracks.TryGetValue(entity, out var track))
-            {
-                var moved = position - track.Current;
-                var heading = moved.LengthSquared() > 1e-6f ? MathF.Atan2(moved.Y, moved.X) : track.Heading;
-                _tracks[entity] = track with { Previous = track.Current, Current = position, Heading = heading, Stamp = simulation.Tick };
-            }
-            else
-            {
-                // New units face the viewer (down the screen) until they move.
-                _tracks[entity] = new Track(position, position, MathF.PI / 4f, MathF.PI / 4f, simulation.Tick, false);
-            }
+            Follow(simulation, entity, index);
+            _creatures.Add(entity);
+            CreatureShot(simulation, entity, index);
         }
 
         // Turrets and shots.
@@ -66,7 +65,7 @@ internal sealed class MotionTracker
             var weapon = simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType).Weapon;
             if (weapon is not null && armament.Cooldown == weapon.CooldownTicks)
             {
-                Shots.Add(new ShotEvent(entity, shooter, aim, world.Store<UnitInfo>().Get(index).UnitType, world.Store<Owner>().Get(index).PlayerId));
+                Shots.Add(new ShotEvent(entity, shooter, aim, weapon.Warhead, world.Store<Owner>().Get(index).PlayerId, ToFloat(weapon.SplashRadius)));
             }
         }
 
@@ -77,13 +76,14 @@ internal sealed class MotionTracker
             if (!world.IsAlive(entity))
             {
                 _gone.Add(entity);
-                Deaths.Add(new DeathEvent(track.Current, 0.5f, false));
+                Deaths.Add(new DeathEvent(track.Current, 0.5f, false, _creatures.Contains(entity)));
             }
         }
 
         foreach (var entity in _gone)
         {
             _tracks.Remove(entity);
+            _creatures.Remove(entity);
         }
 
         _gone.Clear();
@@ -92,7 +92,7 @@ internal sealed class MotionTracker
             if (!world.IsAlive(entity))
             {
                 _gone.Add(entity);
-                Deaths.Add(new DeathEvent(structure.Center, structure.Size, true));
+                Deaths.Add(new DeathEvent(structure.Center, structure.Size, true, false));
             }
         }
 
@@ -127,6 +127,39 @@ internal sealed class MotionTracker
 
     public static float ToFloat(Core.Fix64 value) => (float)(value.RawValue / 4294967296.0);
 
+    private void Follow(GameSimulation simulation, Entity entity, int index)
+    {
+        var position = ToVector(simulation.World.Store<Position>().Get(index).Value);
+        if (_tracks.TryGetValue(entity, out var track))
+        {
+            var moved = position - track.Current;
+            var heading = moved.LengthSquared() > 1e-6f ? MathF.Atan2(moved.Y, moved.X) : track.Heading;
+            _tracks[entity] = track with { Previous = track.Current, Current = position, Heading = heading, Stamp = simulation.Tick };
+        }
+        else
+        {
+            // New units face the viewer (down the screen) until they move.
+            _tracks[entity] = new Track(position, position, MathF.PI / 4f, MathF.PI / 4f, simulation.Tick, false);
+        }
+    }
+
+    // A ranged creature that attacked this tick (its cooldown just reset) fires a visible shot; melee bites do not.
+    private void CreatureShot(GameSimulation simulation, Entity entity, int index)
+    {
+        var world = simulation.World;
+        var creature = world.Store<Creature>().Get(index);
+        var weapon = simulation.Content.Creature(creature.CreatureType).Weapon;
+        if (weapon.Range <= Core.Fix64.One || creature.Cooldown != weapon.CooldownTicks || !world.IsAlive(creature.Target))
+        {
+            return;
+        }
+
+        var from = _tracks[entity].Current;
+        var to = ToVector(simulation.ClosestPointOf(creature.Target, world.Store<Position>().Get(index).Value));
+        _tracks[entity] = _tracks[entity] with { Heading = MathF.Atan2(to.Y - from.Y, to.X - from.X) };
+        Shots.Add(new ShotEvent(entity, from, to, weapon.Warhead, GameSimulation.MawPlayerId, 0f));
+    }
+
     // Turrets swing back toward the hull's heading a little each tick when idle.
     private static float Turn(float from, float to)
     {
@@ -137,8 +170,8 @@ internal sealed class MotionTracker
     private readonly record struct Track(Vector2 Previous, Vector2 Current, float Heading, float TurretHeading, long Stamp, bool Aiming);
 }
 
-/// <summary>A weapon fired this tick.</summary>
-internal readonly record struct ShotEvent(Entity Shooter, Vector2 From, Vector2 To, int UnitType, int Owner);
+/// <summary>A weapon fired this tick: its warhead decides how the shot looks; a splash radius shows as a burst.</summary>
+internal readonly record struct ShotEvent(Entity Shooter, Vector2 From, Vector2 To, Warhead Warhead, int Owner, float Splash);
 
-/// <summary>Something was destroyed this tick.</summary>
-internal readonly record struct DeathEvent(Vector2 Position, float Size, bool IsStructure);
+/// <summary>Something was destroyed this tick. Creatures die in a splat, not an explosion.</summary>
+internal readonly record struct DeathEvent(Vector2 Position, float Size, bool IsStructure, bool IsCreature);

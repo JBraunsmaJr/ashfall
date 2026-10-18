@@ -36,6 +36,16 @@ public static class Palette
     public static readonly LinearColor BaseLight = LinearColor.FromSrgb(255, 210, 150);
     public static readonly LinearColor PowerGlow = LinearColor.FromSrgb(140, 220, 255);
 
+    // The Maw (GDD section 3): bruised violet carapace grown through with ember crystal. Reserved: no team colour
+    // comes near it, so the swarm reads as the swarm at a glance.
+    public static readonly LinearColor MawCarapace = LinearColor.FromSrgb(92, 58, 98);
+    public static readonly LinearColor MawCarapaceDark = LinearColor.FromSrgb(54, 34, 60);
+    public static readonly LinearColor MawFlesh = LinearColor.FromSrgb(128, 70, 96);
+    public static readonly LinearColor MawGlow = LinearColor.FromSrgb(255, 112, 48);
+    public static readonly LinearColor Acid = LinearColor.FromSrgb(150, 226, 60);
+    public static readonly LinearColor Flame = LinearColor.FromSrgb(255, 150, 40);
+    public static readonly LinearColor Wall = LinearColor.FromSrgb(132, 130, 124);
+
     public static readonly LinearColor Panel = LinearColor.FromSrgb(28, 30, 34, 245);
     public static readonly LinearColor PanelLight = LinearColor.FromSrgb(48, 52, 58);
     public static readonly LinearColor PanelEdge = LinearColor.FromSrgb(90, 96, 104);
@@ -57,14 +67,15 @@ public static class Palette
         LinearColor.FromSrgb(214, 58, 46),
         LinearColor.FromSrgb(70, 180, 80),
         LinearColor.FromSrgb(220, 190, 50),
-        LinearColor.FromSrgb(150, 80, 200),
+        LinearColor.FromSrgb(236, 112, 170), // not violet: that is the Maw's
         LinearColor.FromSrgb(40, 190, 190),
         LinearColor.FromSrgb(230, 130, 40),
         LinearColor.FromSrgb(200, 200, 200),
     ];
 
-    /// <summary>The colour that marks <paramref name="player"/>'s units and structures.</summary>
-    public static LinearColor Player(int player) => player >= 0 ? Teams[player % Teams.Length] : Concrete;
+    /// <summary>The colour that marks <paramref name="player"/>'s units and structures (the Maw's violet for the Maw).</summary>
+    public static LinearColor Player(int player) => player >= 0 ? Teams[player % Teams.Length]
+        : player == Simulation.GameSimulation.MawPlayerId ? MawCarapace : Concrete;
 
     public static LinearColor Scale(LinearColor color, float factor) =>
         new(color.R * factor, color.G * factor, color.B * factor, color.A);

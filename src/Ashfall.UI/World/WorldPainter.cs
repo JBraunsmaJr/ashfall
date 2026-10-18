@@ -215,6 +215,58 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         }
     }
 
+    /// <summary>
+    /// The Maw's creatures, inside current vision only: low skittering chaff, upright Spitters with a glowing acid sac,
+    /// and hulking crystal-backed Siegebeasts. All in the Maw's violet with ember crystal, never a team colour.
+    /// </summary>
+    public void PaintCreatures(GameSimulation simulation, float alpha)
+    {
+        var world = simulation.World;
+        var creatures = world.Store<Creature>();
+        foreach (var index in creatures.EntityIndices)
+        {
+            var entity = world.EntityAt(index);
+            var fallback = MotionTracker.ToVector(world.Store<Position>().Get(index).Value);
+            var position = motion.PositionOf(entity, fallback, alpha);
+            if (fog.Sample(position.X, position.Y) < 0.75f)
+            {
+                continue;
+            }
+
+            var heading = motion.HeadingOf(entity);
+            var forward = new Vector2(MathF.Cos(heading), MathF.Sin(heading));
+            batch.Begin(position.X + position.Y, GroundHeight(simulation.Map, position.X, position.Y));
+            switch (simulation.Content.Creature(creatures.Get(index).CreatureType).Id)
+            {
+                case MawContent.Siegebeast:
+                    batch.Disc(position + new Vector2(0.08f, -0.04f), 0.55f, GroundEpsilon, Palette.Shadow);
+                    batch.RotatedBox(position, 0.95f, 0.7f, heading, 0.04f, 0.5f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.RotatedBox(position + (forward * 0.42f), 0.3f, 0.4f, heading, 0.08f, 0.38f, Palette.MawFlesh, Palette.MawCarapace);
+                    for (var spike = -1; spike <= 1; spike++)
+                    {
+                        var at = position - (forward * (spike * 0.22f));
+                        batch.Box(at.X - 0.06f, at.Y - 0.06f, 0.12f, 0.12f, 0.5f, 0.72f - (Math.Abs(spike) * 0.08f), Palette.Scale(Palette.MawGlow, 0.7f), Palette.MawGlow, emissive: 0.8f);
+                    }
+
+                    break;
+
+                case MawContent.Spitter:
+                    batch.Disc(position + new Vector2(0.04f, -0.02f), 0.2f, GroundEpsilon, Palette.Shadow);
+                    batch.RotatedBox(position, 0.24f, 0.2f, heading, 0.02f, 0.34f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.Disc(position - (forward * 0.06f), 0.1f, 0.4f, Palette.Acid, emissive: 0.7f);
+                    break;
+
+                default:
+                    // Skitter: low and many-legged, an ember on its back.
+                    batch.RotatedBox(position, 0.3f, 0.18f, heading, 0.01f, 0.12f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.Disc(position, 0.04f, 0.13f, Palette.MawGlow, emissive: 0.9f);
+                    break;
+            }
+
+            batch.End();
+        }
+    }
+
     /// <summary>A translucent footprint for the structure being placed: green where it can go, red where not.</summary>
     public void PaintPlacement(GameSimulation simulation, int structureType, Cell origin, bool valid)
     {
@@ -247,6 +299,21 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
     private void PaintStructure(StructureDefinition definition, Cell origin, int owner, float progress, FrameScene scene)
     {
+        if (definition.Role == StructureRole.Nest)
+        {
+            PaintNest(definition, origin, scene);
+            return;
+        }
+
+        if (definition.Role == StructureRole.Wall)
+        {
+            // A plain block, shorter while it goes up. No light: a wall line is dozens of segments.
+            var top = 0.45f * Math.Max(0.15f, progress);
+            batch.Box(origin.X + 0.04f, origin.Y + 0.04f, 0.92f, 0.92f, 0, top, Palette.Scale(Palette.Wall, 0.8f), Palette.Wall);
+            batch.Box(origin.X + 0.04f, origin.Y + 0.86f, 0.92f, 0.1f, top - 0.08f, top, Palette.Player(owner), Palette.Player(owner));
+            return;
+        }
+
         var team = Palette.Player(owner);
         var x = origin.X + 0.08f;
         var y = origin.Y + 0.08f;
@@ -330,6 +397,31 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         scene.AddLight(new PointLight(new Vector3(origin.X + definition.Width + 0.3f, origin.Y + definition.Height + 0.3f, 0.9f + batch.Lift), 2.6f, Palette.BaseLight, 0.55f));
     }
 
+    // A Maw nest: an organic mound, taller and more crystal-studded with each tier, glowing from within.
+    private void PaintNest(StructureDefinition definition, Cell origin, FrameScene scene)
+    {
+        var tier = definition.Id switch
+        {
+            MawContent.BehemothDen => 3,
+            MawContent.BroodNest => 2,
+            _ => 1,
+        };
+        var center = new Vector2(origin.X + (definition.Width / 2f), origin.Y + (definition.Height / 2f));
+        var height = 0.3f + (0.18f * tier);
+        batch.Disc(center, (definition.Width / 2f) + 0.1f, GroundEpsilon, Palette.WithAlpha(Palette.MawCarapaceDark, 0.9f));
+        batch.Box(origin.X + 0.3f, origin.Y + 0.3f, definition.Width - 0.6f, definition.Height - 0.6f, 0, height, Palette.MawCarapaceDark, Palette.MawCarapace);
+        batch.Box(origin.X + 0.8f, origin.Y + 0.8f, definition.Width - 1.6f, definition.Height - 1.6f, height, height + 0.2f, Palette.MawFlesh, Palette.MawFlesh);
+        batch.Disc(center, 0.35f, height + 0.21f, Palette.MawGlow, emissive: 1f);
+        for (var i = 0; i < tier * 3; i++)
+        {
+            var angle = i * 2.4f;
+            var at = center + (new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * (0.7f + (0.25f * (i % 2))));
+            batch.Box(at.X - 0.07f, at.Y - 0.07f, 0.14f, 0.14f, 0.1f, height + 0.15f + (0.1f * (i % 3)), Palette.Scale(Palette.MawGlow, 0.6f), Palette.MawGlow, emissive: 0.7f);
+        }
+
+        scene.AddLight(new PointLight(new Vector3(center, height + 0.8f + batch.Lift), 2.5f + tier, Palette.MawGlow, 0.9f));
+    }
+
     private void PaintUnit(UnitDefinition definition, Vector2 position, float heading, float turret, int owner, float cargo)
     {
         var team = Palette.Player(owner);
@@ -361,6 +453,13 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 if (definition.Id == BulwarkContent.Rocketeer)
                 {
                     batch.RotatedBox(position + (new Vector2(MathF.Cos(turret + 1.2f), MathF.Sin(turret + 1.2f)) * 0.1f), 0.34f, 0.07f, turret, 0.3f, 0.37f, Palette.Metal, Palette.Metal);
+                }
+                else if (definition.Id == BulwarkContent.Pyro)
+                {
+                    // Fuel tanks on the back and a pilot light at the nozzle.
+                    var back = position - (new Vector2(MathF.Cos(heading), MathF.Sin(heading)) * 0.1f);
+                    batch.RotatedBox(back, 0.1f, 0.18f, heading, 0.14f, 0.36f, Palette.HarvesterYellow, Palette.HarvesterYellow);
+                    batch.Disc(position + (new Vector2(MathF.Cos(turret), MathF.Sin(turret)) * 0.16f), 0.03f, 0.3f, Palette.Flame, emissive: 1f);
                 }
 
                 break;

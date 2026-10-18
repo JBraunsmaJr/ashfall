@@ -198,6 +198,11 @@ public sealed record MatchSpec
                 throw new ArgumentOutOfRangeException(nameof(Players), Players, "The swarm test has one player, the fortress.");
             }
 
+            if (Controllers[0] == PlayerController.ScriptedAi)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Controllers), Controllers[0], "The fortress is held by a person (here or in a replay) or left idle.");
+            }
+
             if (Map.Width != SwarmFortress.Size || Map.Height != SwarmFortress.Size)
             {
                 throw new ArgumentOutOfRangeException(nameof(Map), Map, $"The swarm test is played on a {SwarmFortress.Size}-cell square map.");

@@ -51,6 +51,17 @@ public sealed class HeadlessMatch : IAsyncDisposable
         if (spec.Mode == MatchMode.Swarm)
         {
             Simulation = CreateSwarm(spec);
+            if (spec.Controllers[0] == PlayerController.Human)
+            {
+                LocalPlayer = new LocalOrders(0);
+                _sources.Add(LocalPlayer);
+            }
+            else if (spec.Controllers[0] == PlayerController.Remote)
+            {
+                Turns = new TurnFeed([0], spec.Players, spec.InputDelay); // a replay of someone holding the fortress
+                _sources.Insert(0, Turns);
+            }
+
             return;
         }
 

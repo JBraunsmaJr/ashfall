@@ -38,6 +38,10 @@ internal sealed record ClientOptions
           --slider <name=value>  Generated map slider 0-100 (size, richness, elevation, water,
                                  chokepoints, basespacing, vegetation); repeatable
           --record <file>        Save a replay of the match when it ends or you leave
+          --swarm                Hold the line: command the Bulwark fortress against the Maw
+          --nests <n>            With --swarm: the Maw breeds from n Spawning Pits (1-8, default 4) that feed
+                                 and evolve; 0 sends a horde from the map edges instead
+          --creatures <n>        With --swarm: the most creatures alive at once (default 2000)
           -h, --help             Show this help
 
         Multiplayer (peer to peer; the host forwards one UDP port, default 47600):
@@ -60,6 +64,13 @@ internal sealed record ClientOptions
     public PlayerController Opponent { get; init; } = PlayerController.ScriptedAi;
 
     public bool Spectate { get; init; }
+
+    /// <summary>Play the swarm fortress against the Maw instead of a skirmish.</summary>
+    public bool Swarm { get; init; }
+
+    public int Nests { get; init; } = 4;
+
+    public int Creatures { get; init; } = 2_000;
 
     public bool Autopilot { get; init; }
 
@@ -129,6 +140,12 @@ internal sealed record ClientOptions
 
     public MatchSpec ToSpec()
     {
+        if (Swarm)
+        {
+            var swarm = MatchSpec.Swarm(Seed, Creatures, Nests);
+            return Spectate ? swarm : swarm.WithController(0, PlayerController.Human);
+        }
+
         var spec = MatchSpec.Skirmish(Seed).WithGeneratedMap(GeneratedMap);
         return Spectate
             ? spec
@@ -167,6 +184,9 @@ internal sealed record ClientOptions
                 case "--skirmish":
                     options = options with { Skirmish = true };
                     continue;
+                case "--swarm":
+                    options = options with { Swarm = true, SkirmishImplied = true };
+                    continue;
                 case "--host":
                     options = options with { Host = true };
                     continue;
@@ -181,6 +201,12 @@ internal sealed record ClientOptions
             var value = args[++i];
             switch (name)
             {
+                case "--nests" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var nests) && nests <= MatchSpec.SwarmMaxNests:
+                    options = options with { Nests = nests, Swarm = true, SkirmishImplied = true };
+                    break;
+                case "--creatures" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var creatures) && creatures is >= 1 and <= MatchSpec.SwarmMaxCreatures:
+                    options = options with { Creatures = creatures, Swarm = true, SkirmishImplied = true };
+                    break;
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
                     options = options with { Seed = seed, SeedGiven = true, SkirmishImplied = true };
                     break;

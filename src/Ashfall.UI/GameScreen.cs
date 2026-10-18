@@ -143,8 +143,7 @@ public sealed class GameScreen
             var visible = shot.Owner == Player || _fog.Sample(shot.From.X, shot.From.Y) >= 0.75f || _fog.Sample(shot.To.X, shot.To.Y) >= 0.75f;
             if (visible)
             {
-                var heavy = Simulation.Content.Unit(shot.UnitType).Weapon?.Warhead == Warhead.AntiArmour;
-                _effects.Shot(shot, heavy, _now);
+                _effects.Shot(shot, _now);
             }
         }
 
@@ -211,6 +210,7 @@ public sealed class GameScreen
         _painter.PaintTerrain(Simulation, Camera, time);
         _painter.PaintStructures(Simulation, Player, _selectedSet, scene);
         _painter.PaintUnits(Simulation, Player, _selectedSet, Math.Clamp(alpha, 0f, 1f));
+        _painter.PaintCreatures(Simulation, Math.Clamp(alpha, 0f, 1f));
         if (_placing >= 0 && _lineStart is { } lineStart)
         {
             var cost = Simulation.Content.Structure(_placing).Cost;
@@ -537,7 +537,7 @@ public sealed class GameScreen
         if (input.WasPressed(MouseButton.Right) && _orders is not null && _selection.Count > 0)
         {
             var target = PickEntity(input.Mouse);
-            if (!target.IsNone && OwnerOf(target) >= 0 && Simulation.AreEnemies(Player, OwnerOf(target)))
+            if (!target.IsNone && Simulation.AreEnemies(Player, OwnerOf(target))) // players and the Maw alike
             {
                 IssueAttack(target);
             }
@@ -670,6 +670,25 @@ public sealed class GameScreen
             var definition = Simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType);
             var radius = (definition.IsHarvester || definition.Id == BulwarkContent.Warden ? 20f : 12f) * Camera.Zoom;
             var distance = Vector2.Distance(Camera.WorldToScreen(new Vector3(position, 0.2f + GroundHeight(position))), mouse);
+            if (distance < radius && distance < bestDistance)
+            {
+                best = entity;
+                bestDistance = distance;
+            }
+        }
+
+        foreach (var index in world.Store<Creature>().EntityIndices)
+        {
+            var entity = world.EntityAt(index);
+            var position = _motion.PositionOf(entity, MotionTracker.ToVector(world.Store<Position>().Get(index).Value), 1f);
+            if (_fog.Sample(position.X, position.Y) < 0.75f)
+            {
+                continue;
+            }
+
+            var heavy = Simulation.Content.Creature(world.Store<Creature>().Get(index).CreatureType).CellWeight > 1;
+            var radius = (heavy ? 26f : 10f) * Camera.Zoom;
+            var distance = Vector2.Distance(Camera.WorldToScreen(new Vector3(position, 0.15f + GroundHeight(position))), mouse);
             if (distance < radius && distance < bestDistance)
             {
                 best = entity;
@@ -811,7 +830,8 @@ public sealed class GameScreen
     {
         var world = Simulation.World;
 
-        // Health bars over selected and damaged units.
+        // Health bars over selected and damaged units and structures, and damaged behemoths (not chaff: a wave would
+        // be a wall of bars).
         foreach (var index in world.Store<Health>().EntityIndices)
         {
             var entity = world.EntityAt(index);
@@ -836,6 +856,18 @@ public sealed class GameScreen
                 var middle = new Vector2(info.Origin.X + (definition.Width / 2f), info.Origin.Y + (definition.Height / 2f));
                 anchor = new Vector3(middle, WorldPainter.StructureHeight(definition.Role) + 0.9f + GroundHeight(middle));
                 width = 16f * definition.Width;
+            }
+            else if (world.Has<Creature>(entity))
+            {
+                var creature = Simulation.Content.Creature(world.Get<Creature>(entity).CreatureType);
+                var position = _motion.PositionOf(entity, MotionTracker.ToVector(world.Get<Position>(entity).Value), alpha);
+                if (creature.CellWeight < Ashfall.Simulation.Systems.SwarmSystem.CellCapacity || _fog.Sample(position.X, position.Y) < 0.75f)
+                {
+                    continue;
+                }
+
+                anchor = new Vector3(position, 1.0f + GroundHeight(position));
+                width = 36f;
             }
             else
             {

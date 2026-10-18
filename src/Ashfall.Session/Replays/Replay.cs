@@ -45,7 +45,7 @@ public sealed class Replay
     {
         ArgumentNullException.ThrowIfNull(match);
         var spec = match.Spec;
-        if (spec.Mode == MatchMode.Skirmish)
+        if (spec.Mode is MatchMode.Skirmish or MatchMode.Swarm)
         {
             var controllers = spec.Controllers
                 .Select(controller => controller == PlayerController.Human ? PlayerController.Remote : controller)

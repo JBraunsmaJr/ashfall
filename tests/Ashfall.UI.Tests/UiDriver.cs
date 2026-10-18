@@ -24,10 +24,14 @@ internal sealed class UiDriver
     private double _time;
 
     public UiDriver(PlayerController opponent = PlayerController.IdleAi, ulong seed = 7)
+        : this(MatchSpec.Skirmish(seed).WithController(0, PlayerController.Human).WithController(1, opponent))
     {
-        Match = HeadlessMatch.Start(
-            MatchSpec.Skirmish(seed).WithController(0, PlayerController.Human).WithController(1, opponent),
-            GameSpeed.Unthrottled);
+    }
+
+    /// <summary>Any match with a human seat: a skirmish, or the swarm fortress against the Maw.</summary>
+    public UiDriver(MatchSpec spec)
+    {
+        Match = HeadlessMatch.Start(spec, GameSpeed.Unthrottled);
         Screen = new GameScreen(Match);
         Frame();
     }

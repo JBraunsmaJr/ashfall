@@ -1,6 +1,8 @@
-﻿using Ashfall.Session;
+﻿using Ashfall.Content;
+using Ashfall.Session;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
+using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
 
 namespace Ashfall.E2E.Tests;
@@ -77,8 +79,45 @@ public class SwarmMatchTests
     }
 
     [Fact]
+    public async Task A_fortress_held_by_a_person_is_recorded_and_replays_to_the_same_end()
+    {
+        await using var match = await HeadlessMatch.StartAsync(
+            MatchSpec.Swarm(5, creatures: 400, nests: 2).WithController(0, PlayerController.Human), GameSpeed.Unthrottled);
+        var simulation = match.Simulation;
+        var orders = match.LocalPlayer!;
+        var content = simulation.Content;
+        var wall = content.StructureIndex(BulwarkContent.Wall);
+        var barracks = simulation.World.EntityAt(simulation.World.Store<StructureInfo>().EntityIndices.ToArray()
+            .First(index => content.Structure(simulation.World.Store<StructureInfo>().Get(index).StructureType).Id == BulwarkContent.Barracks));
+
+        // A short wall line just inside the fortress, and two Pyros.
+        var placed = 0;
+        for (var x = 50; x < 80 && placed < 6; x++)
+        {
+            var cell = new Ashfall.Simulation.Map.Cell(x, 56);
+            if (simulation.CheckPlacement(0, wall, cell) == Ashfall.Simulation.PlacementResult.Ok)
+            {
+                orders.Enqueue(Command.Build(0, wall, cell));
+                placed++;
+            }
+        }
+
+        orders.Enqueue(Command.Train(0, barracks, content.UnitIndex(BulwarkContent.Pyro)));
+        orders.Enqueue(Command.Train(0, barracks, content.UnitIndex(BulwarkContent.Pyro)));
+        await match.RunTicksAsync(900, TestContext.Current.CancellationToken);
+        Assert.Equal(6, placed);
+        Assert.Equal(0, simulation.RejectedCommands);
+
+        var replay = Ashfall.Session.Replays.Replay.Decode(Ashfall.Session.Replays.Replay.From(match).Encode());
+        Assert.Equal(PlayerController.Remote, replay.Spec.Controllers[0]);
+        Assert.Equal((2, 400), (replay.Spec.Nests, replay.Spec.Creatures));
+        Assert.True(replay.Verify().Matches);
+    }
+
+    [Fact]
     public void Swarm_specs_are_validated()
     {
+        Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Swarm(1).WithController(0, PlayerController.ScriptedAi).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Swarm(1, nests: MatchSpec.SwarmMaxNests + 1).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Swarm(1, nests: -1).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => (MatchSpec.Swarm(1) with { Creatures = MatchSpec.SwarmMaxCreatures + 1 }).Validate());

@@ -71,6 +71,20 @@ internal static class Minimap
             canvas.Rect(area.X + (position.X * cell) - (dot / 2), area.Y + (position.Y * cell) - (dot / 2), dot, dot, Palette.Scale(Palette.Player(owner), 1.3f));
         }
 
+        // The Maw, where it can be seen: one small bright dot per creature, so a wave reads as a stain spreading in.
+        var speck = Math.Max(1.5f, cell);
+        var mawDot = Palette.Scale(Palette.MawCarapace, 1.9f);
+        foreach (var index in world.Store<Creature>().EntityIndices)
+        {
+            var position = MotionTracker.ToVector(world.Store<Position>().Get(index).Value);
+            if (fog.Sample(position.X, position.Y) < 0.75f)
+            {
+                continue;
+            }
+
+            canvas.Rect(area.X + (position.X * cell) - (speck / 2), area.Y + (position.Y * cell) - (speck / 2), speck, speck, mawDot);
+        }
+
         // The camera's view: the ground under the viewport's four corners.
         var origin = camera.ViewportOrigin;
         var size = camera.ViewportSize;
