@@ -73,6 +73,20 @@ public class ReplayAndMapTests
     }
 
     [Fact]
+    public void Swarm_settings_round_trip_through_the_replay_codec()
+    {
+        var spec = MatchSpec.Swarm(5, creatures: 2_500);
+        var writer = new PacketWriter();
+        MatchSpecCodec.Write(writer, spec);
+
+        var read = MatchSpecCodec.Read(new PacketReader(writer.ToArray()));
+
+        Assert.Equal(MatchMode.Swarm, read.Mode);
+        Assert.Equal(2_500, read.Creatures);
+        Assert.Equal(spec.Map, read.Map);
+    }
+
+    [Fact]
     public void The_quad_map_is_four_way_symmetric_with_room_for_every_base()
     {
         var map = QuadMap.Create();
@@ -150,9 +164,12 @@ public class ReplayAndMapTests
         var standard = GameContent.Standard;
         var units = standard.Units.ToList();
         units[0] = units[0] with { Cost = units[0].Cost + 1 };
-        var tweaked = new GameContent(units, standard.Structures, standard.Factions, standard.Economy);
+        var tweaked = new GameContent(units, standard.Structures, standard.Factions, standard.Economy, standard.Creatures);
+        var creatures = standard.Creatures.ToList();
+        creatures[0] = creatures[0] with { Health = creatures[0].Health + 1 };
 
-        Assert.Equal(standard.ComputeHash(), BulwarkContent.Create().ComputeHash());
+        Assert.Equal(standard.ComputeHash(), BulwarkContent.Create().WithCreatures(MawContent.Creatures()).ComputeHash());
         Assert.NotEqual(standard.ComputeHash(), tweaked.ComputeHash());
+        Assert.NotEqual(standard.ComputeHash(), standard.WithCreatures(creatures).ComputeHash());
     }
 }

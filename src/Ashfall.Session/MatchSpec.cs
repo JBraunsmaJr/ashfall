@@ -16,6 +16,12 @@ public sealed record MatchSpec
     /// <summary>Default skirmish tick limit: 60 minutes of game time. A match still running then is a failure.</summary>
     public const long SkirmishTickLimit = 54_000;
 
+    /// <summary>Creatures in the swarm stress test unless told otherwise: the GDD's 5,000-creature target.</summary>
+    public const int SwarmDefaultCreatures = 5_000;
+
+    /// <summary>Most creatures a swarm match may ask for.</summary>
+    public const int SwarmMaxCreatures = 20_000;
+
     public required ulong Seed { get; init; }
 
     public MatchMode Mode { get; init; } = MatchMode.ProvingGround;
@@ -49,6 +55,9 @@ public sealed record MatchSpec
     /// <summary>Skirmish only: the procedural map to play on, or null for the hand-made duel/quad map.</summary>
     public MapSettings? GeneratedMap { get; init; }
 
+    /// <summary>Swarm only: how many creatures the Maw keeps alive.</summary>
+    public int Creatures { get; init; }
+
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
@@ -71,6 +80,21 @@ public sealed record MatchSpec
             Teams = Enumerable.Range(0, players).ToArray(),
         };
     }
+
+    /// <summary>
+    /// The horde stress test: one Bulwark fortress with idle defenders in the middle of an open
+    /// <see cref="Maps.SwarmFortress.Size"/>-cell map, and a Maw that keeps <paramref name="creatures"/> alive.
+    /// </summary>
+    public static MatchSpec Swarm(ulong seed, int creatures = SwarmDefaultCreatures) => new()
+    {
+        Seed = seed,
+        Mode = MatchMode.Swarm,
+        Map = new MapBounds(SwarmFortress.Size, SwarmFortress.Size),
+        Players = 1,
+        Controllers = [PlayerController.IdleAi],
+        Teams = [0],
+        Creatures = creatures,
+    };
 
     public MatchSpec WithPlayers(int players) => this with { Players = players };
 
@@ -155,6 +179,22 @@ public sealed record MatchSpec
             {
                 throw new ArgumentOutOfRangeException(nameof(Teams), "A skirmish needs at least two teams.");
             }
+        }
+
+        if (Mode == MatchMode.Swarm)
+        {
+            if (Players != 1 || Controllers.Count != 1 || Teams.Count != 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Players), Players, "The swarm test has one player, the fortress.");
+            }
+
+            if (Map.Width != SwarmFortress.Size || Map.Height != SwarmFortress.Size)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Map), Map, $"The swarm test is played on a {SwarmFortress.Size}-cell square map.");
+            }
+
+            ArgumentOutOfRangeException.ThrowIfNegative(Creatures, nameof(Creatures));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(Creatures, SwarmMaxCreatures, nameof(Creatures));
         }
 
         if (Controllers.Count(controller => controller == PlayerController.Human) > 1)

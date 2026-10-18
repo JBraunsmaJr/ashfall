@@ -11,6 +11,7 @@ namespace Ashfall.Determinism.Tests;
 /// <item><b>proving-ground</b> (M0): 200 wandering units on an open map for two minutes.</item>
 /// <item><b>skirmish</b> (M1): the default 1v1 Bulwark duel between scripted AIs, played to victory.</item>
 /// <item><b>generated</b> (M4): a 2v2 between scripted AIs on a generated Riverlands map, played to victory.</item>
+/// <item><b>swarm</b> (M5): 1,000 Maw creatures against the Bulwark fortress for one minute.</item>
 /// </list>
 /// <c>maps.hashes</c> pins the generator itself: map code, player count and the grid's hash.
 /// </summary>
@@ -20,6 +21,7 @@ namespace Ashfall.Determinism.Tests;
 /// dotnet run --project src/Ashfall.Headless -c Release -- --hash-out tests/Ashfall.Determinism.Tests/Golden/proving-ground.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/proving-ground.checkpoints
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode skirmish --hash-out tests/Ashfall.Determinism.Tests/Golden/skirmish.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/skirmish.checkpoints
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode skirmish --players 4 --teams 0,1,0,1 --map-code RIV-20000Z-N5NJHJ-TM6XWS --hash-out tests/Ashfall.Determinism.Tests/Golden/generated.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/generated.checkpoints
+/// dotnet run --project src/Ashfall.Headless -c Release -- --mode swarm --creatures 1000 --ticks 900 --hash-out tests/Ashfall.Determinism.Tests/Golden/swarm.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/swarm.checkpoints
 /// dotnet run --project tools/Ashfall.Tools.MapPreview -c Release -- --code CODE --players N   (prints the hash for maps.hashes)
 /// </code>
 /// and say why in the commit message. Never regenerate them to make an unexplained failure go away.
@@ -29,7 +31,12 @@ public class GoldenReplayTests
     /// <summary>The generated-map reference match: a 2v2 on this Riverlands map.</summary>
     public const string GeneratedMapCode = "RIV-20000Z-N5NJHJ-TM6XWS";
 
-    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish", "generated" };
+    /// <summary>The swarm reference run: this many creatures for this many ticks (a minute of game time).</summary>
+    public const int SwarmCreatures = 1_000;
+
+    public const long SwarmTicks = 900;
+
+    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish", "generated", "swarm" };
 
     [Fact]
     public void Generated_maps_match_their_golden_hashes()
@@ -93,6 +100,12 @@ public class GoldenReplayTests
             var spec = MatchSpec.Skirmish(ProvingGround.DefaultSeed, 4).WithTeams(0, 1, 0, 1).WithGeneratedMap(map);
             await using var generated = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled);
             return await generated.RunToCompletionAsync(MatchSpec.SkirmishTickLimit, cancellation);
+        }
+
+        if (replay == "swarm")
+        {
+            await using var swarm = await HeadlessMatch.StartAsync(MatchSpec.Swarm(ProvingGround.DefaultSeed, SwarmCreatures), GameSpeed.Unthrottled);
+            return await swarm.RunTicksAsync(SwarmTicks, cancellation);
         }
 
         if (replay == "skirmish")

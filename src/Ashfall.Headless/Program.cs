@@ -43,26 +43,47 @@ if (options.IsNetwork)
 }
 
 var spec = options.ToMatchSpec();
-Console.WriteLine(spec.Mode == MatchMode.Skirmish
-    ? string.Create(
+Console.WriteLine(spec.Mode switch
+{
+    MatchMode.Skirmish => string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}")
-    : string.Create(
+        $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}"),
+    MatchMode.Swarm => string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"));
+        $"mode=swarm seed={spec.Seed} creatures={spec.Creatures} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} tick-budget={(options.TickBudgetMs is { } budget ? budget + "ms" : "none")}"),
+    _ => string.Create(
+        CultureInfo.InvariantCulture,
+        $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"),
+});
 
 MatchResult? first = null;
 var allMatch = true;
+var overBudget = false;
 for (var run = 1; run <= options.Repeat; run++)
 {
     await using var match = await HeadlessMatch.StartAsync(spec, options.Speed).ConfigureAwait(false);
-    var result = spec.Mode == MatchMode.Skirmish
-        ? await RunSkirmishAsync(match, options, cancellation.Token).ConfigureAwait(false)
-        : await match.RunTicksAsync(options.Ticks, cancellation.Token).ConfigureAwait(false);
+    SwarmRunner.SwarmRun? swarm = null;
+    MatchResult result;
+    if (spec.Mode == MatchMode.Swarm)
+    {
+        swarm = SwarmRunner.Run(match, options.Ticks, cancellation.Token);
+        result = swarm.Result;
+        overBudget |= options.TickBudgetMs is { } budget && SwarmRunner.BudgetedMean(swarm) > budget;
+    }
+    else
+    {
+        result = spec.Mode == MatchMode.Skirmish
+            ? await RunSkirmishAsync(match, options, cancellation.Token).ConfigureAwait(false)
+            : await match.RunTicksAsync(options.Ticks, cancellation.Token).ConfigureAwait(false);
+    }
 
-    var outcome = spec.Mode != MatchMode.Skirmish ? string.Empty
-        : result.IsOver ? string.Create(CultureInfo.InvariantCulture, $" winner=team {result.WinningTeam} ({result.FinalTick / 900.0:F1} game minutes)")
-        : " winner=none (tick limit reached)";
+    var outcome = spec.Mode switch
+    {
+        MatchMode.Swarm => swarm!.Describe(),
+        MatchMode.Skirmish when result.IsOver => string.Create(CultureInfo.InvariantCulture, $" winner=team {result.WinningTeam} ({result.FinalTick / 900.0:F1} game minutes)"),
+        MatchMode.Skirmish => " winner=none (tick limit reached)",
+        _ => string.Empty,
+    };
     Console.WriteLine(string.Create(
         CultureInfo.InvariantCulture,
         $"run {run}: tick={result.FinalTick} hash={result.FinalStateHashText} elapsed={result.WallClockElapsed.TotalMilliseconds:F0}ms rate={result.TicksPerSecond} ticks/s{outcome}"));
@@ -111,6 +132,14 @@ if (options.Repeat > 1)
 if (!allMatch)
 {
     return 1;
+}
+
+if (overBudget)
+{
+    await Console.Error.WriteLineAsync(string.Create(
+        CultureInfo.InvariantCulture,
+        $"OVER BUDGET: the mean tick (overall or while fighting) took longer than {options.TickBudgetMs} ms.")).ConfigureAwait(false);
+    return 6;
 }
 
 return spec.Mode == MatchMode.Skirmish && first is { IsOver: false } ? 3 : 0;

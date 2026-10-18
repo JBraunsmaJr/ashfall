@@ -16,9 +16,13 @@ public sealed class TargetingSystem : ISystem
     private const int ScanPeriod = 8;
     private const int ChasePeriod = 10;
 
+    // Scratch for target scans: enemies within range, sorted back into Health-store order.
+    private readonly List<Candidate> _candidates = [];
+
     public void Update(in TickContext context)
     {
         var world = context.World;
+        context.Simulation.Spatial.Rebuild(world);
         var armaments = world.Store<Armament>();
         var indices = armaments.EntityIndices;
         var weapons = armaments.Components;
@@ -51,7 +55,7 @@ public sealed class TargetingSystem : ISystem
                 && order.Kind is OrderKind.Idle or OrderKind.AttackMove
                 && context.IsStaggeredTick(unit.Index, ScanPeriod))
             {
-                armament.Target = FindNearestEnemy(context, owner, position, definition.AcquisitionRange);
+                armament.Target = FindNearestEnemy(context, _candidates, owner, position, definition.AcquisitionRange);
             }
 
             if (!armament.Target.IsNone)
@@ -111,43 +115,90 @@ public sealed class TargetingSystem : ISystem
         && context.World.Has<Health>(target)
         && context.Simulation.AreEnemies(owner, context.World.Get<Owner>(target).PlayerId);
 
-    // Nearest enemy (closest point, then lowest entity index) within range; units before structures at equal distance.
-    private static Entity FindNearestEnemy(in TickContext context, int owner, FixVec2 position, Fix64 range)
+    /// <summary>
+    /// The enemy an idle unit at <paramref name="position"/> engages: within <paramref name="range"/>, preferring
+    /// units to structures, then the nearest (closest point of a structure's footprint), then the lowest entity index.
+    /// </summary>
+    /// <remarks>
+    /// The rule is applied as a fold over candidates in <see cref="Health"/>-store order, and a structure met
+    /// first can hide a farther unit, so the result depends on that order. Candidates come from the spatial grid
+    /// (units and creatures near the scanner) and the structure list, then are sorted back into store order, so
+    /// the answer is exactly what a scan of every entity would give, at a fraction of the cost.
+    /// </remarks>
+    internal static Entity FindNearestEnemy(in TickContext context, List<Candidate> candidates, int owner, FixVec2 position, Fix64 range)
     {
         var world = context.World;
+        var simulation = context.Simulation;
         var healths = world.Store<Health>();
         var owners = world.Store<Owner>();
-        var indices = healths.EntityIndices;
-        var best = Entity.None;
-        var bestDistance = range * range;
-        var bestIsStructure = true;
-        for (var i = 0; i < indices.Length; i++)
+        var rangeSquared = range * range;
+        candidates.Clear();
+
+        var structures = world.Store<StructureInfo>();
+        foreach (var index in structures.EntityIndices)
         {
-            var index = indices[i];
-            if (!context.Simulation.AreEnemies(owner, owners.Get(index).PlayerId))
+            if (!simulation.AreEnemies(owner, owners.Get(index).PlayerId))
             {
                 continue;
             }
 
-            var candidate = world.EntityAt(index);
-            var distance = FixVec2.DistanceSquared(position, context.Simulation.ClosestPointOf(candidate, position));
-            var isStructure = world.Has<StructureInfo>(candidate);
-            if (distance > bestDistance)
+            var distance = FixVec2.DistanceSquared(position, simulation.ClosestPointOf(world.EntityAt(index), position));
+            if (distance <= rangeSquared)
+            {
+                candidates.Add(new Candidate(healths.SlotOf(index), index, distance, IsStructure: true));
+            }
+        }
+
+        var grid = simulation.Spatial;
+        var positions = world.Store<Position>();
+        var (minX, minY, maxX, maxY) = grid.CellsAround(position, range);
+        for (var y = minY; y <= maxY; y++)
+        {
+            for (var x = minX; x <= maxX; x++)
+            {
+                foreach (var index in grid.At(x, y))
+                {
+                    if (!simulation.AreEnemies(owner, owners.Get(index).PlayerId))
+                    {
+                        continue;
+                    }
+
+                    var distance = FixVec2.DistanceSquared(position, positions.Get(index).Value);
+                    if (distance <= rangeSquared)
+                    {
+                        candidates.Add(new Candidate(healths.SlotOf(index), index, distance, IsStructure: false));
+                    }
+                }
+            }
+        }
+
+        candidates.Sort(static (a, b) => a.Slot.CompareTo(b.Slot));
+
+        var best = Entity.None;
+        var bestDistance = rangeSquared;
+        var bestIsStructure = true;
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Distance > bestDistance)
             {
                 continue;
             }
 
             var better = best.IsNone
-                || (bestIsStructure && !isStructure)
-                || (bestIsStructure == isStructure && (distance < bestDistance || (distance == bestDistance && index < best.Index)));
+                || (bestIsStructure && !candidate.IsStructure)
+                || (bestIsStructure == candidate.IsStructure
+                    && (candidate.Distance < bestDistance || (candidate.Distance == bestDistance && candidate.Index < best.Index)));
             if (better)
             {
-                best = candidate;
-                bestDistance = distance;
-                bestIsStructure = isStructure;
+                best = world.EntityAt(candidate.Index);
+                bestDistance = candidate.Distance;
+                bestIsStructure = candidate.IsStructure;
             }
         }
 
         return best;
     }
+
+    /// <summary>An enemy within range: its place in Health-store order, entity index, squared distance and kind.</summary>
+    internal readonly record struct Candidate(int Slot, int Index, Fix64 Distance, bool IsStructure);
 }

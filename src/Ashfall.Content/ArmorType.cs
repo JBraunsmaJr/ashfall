@@ -9,4 +9,10 @@ public enum ArmorType : byte
     Heavy = 2,
     Structure = 3,
     Air = 4,
+
+    /// <summary>Maw chaff and specialists: soft flesh, shredded by flame, shrugs off anti-armour.</summary>
+    Biomass = 5,
+
+    /// <summary>Maw behemoths and nests: crystal-grown plates that only anti-armour cracks.</summary>
+    Carapace = 6,
 }

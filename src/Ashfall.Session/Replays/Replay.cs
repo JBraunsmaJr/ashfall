@@ -15,7 +15,8 @@ public sealed class Replay
 {
     private static ReadOnlySpan<byte> Magic => "ASHFALL-REPLAY\0\0"u8;
 
-    private const int FormatVersion = 2;
+    // 1: first format. 2: generated map code. 3: swarm creature count.
+    private const int FormatVersion = 3;
 
     public Replay(MatchSpec spec, ulong contentHash, IReadOnlyList<(long Tick, Command[] Commands)> commands, long finalTick, ulong finalHash)
     {

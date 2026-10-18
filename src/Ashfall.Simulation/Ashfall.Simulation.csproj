@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Ashfall.Content\Ashfall.Content.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ashfall.Simulation.Tests" />
+  </ItemGroup>
+
 </Project>

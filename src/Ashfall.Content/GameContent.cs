@@ -11,12 +11,14 @@ public sealed class GameContent
     private readonly Dictionary<string, int> _unitIndices = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _structureIndices = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _factionIndices = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _creatureIndices = new(StringComparer.Ordinal);
 
     public GameContent(
         IReadOnlyList<UnitDefinition> units,
         IReadOnlyList<StructureDefinition> structures,
         IReadOnlyList<FactionDefinition> factions,
-        EconomyRules economy)
+        EconomyRules economy,
+        IReadOnlyList<CreatureDefinition>? creatures = null)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(structures);
@@ -27,6 +29,7 @@ public sealed class GameContent
         Structures = structures;
         Factions = factions;
         Economy = economy;
+        Creatures = creatures ?? [];
 
         for (var i = 0; i < units.Count; i++)
         {
@@ -43,6 +46,11 @@ public sealed class GameContent
             Register(_factionIndices, factions[i].Id, i, "faction");
         }
 
+        for (var i = 0; i < Creatures.Count; i++)
+        {
+            Register(_creatureIndices, Creatures[i].Id, i, "creature");
+        }
+
         Validate();
     }
 
@@ -54,8 +62,15 @@ public sealed class GameContent
 
     public EconomyRules Economy { get; }
 
-    /// <summary>The content shipped with the game. M1: the Bulwark only.</summary>
-    public static GameContent Standard { get; } = BulwarkContent.Create();
+    /// <summary>The Maw's creature types (GDD section 3). Empty for content without a horde.</summary>
+    public IReadOnlyList<CreatureDefinition> Creatures { get; }
+
+    /// <summary>The content shipped with the game: the Bulwark and the Maw.</summary>
+    public static GameContent Standard { get; } = BulwarkContent.Create().WithCreatures(MawContent.Creatures());
+
+    /// <summary>The same definitions with <paramref name="creatures"/> as the Maw's roster.</summary>
+    public GameContent WithCreatures(IReadOnlyList<CreatureDefinition> creatures) =>
+        new(Units, Structures, Factions, Economy, creatures);
 
     public int UnitIndex(string id) =>
         _unitIndices.TryGetValue(id, out var index) ? index : throw new KeyNotFoundException($"Unknown unit '{id}'.");
@@ -65,6 +80,9 @@ public sealed class GameContent
 
     public int FactionIndex(string id) =>
         _factionIndices.TryGetValue(id, out var index) ? index : throw new KeyNotFoundException($"Unknown faction '{id}'.");
+
+    public int CreatureIndex(string id) =>
+        _creatureIndices.TryGetValue(id, out var index) ? index : throw new KeyNotFoundException($"Unknown creature '{id}'.");
 
     /// <summary>
     /// A fingerprint of every definition and rule. Peers compare it in the lobby: two players with
@@ -130,6 +148,21 @@ public sealed class GameContent
             }
         }
 
+        foreach (var creature in Creatures)
+        {
+            hasher.Add(creature.Id);
+            hasher.Add(creature.Health);
+            hasher.Add((int)creature.Armor);
+            hasher.Add(creature.SpeedPerTick);
+            hasher.Add(creature.AggroRange);
+            hasher.Add(creature.BiomassCost);
+            hasher.Add(creature.Weapon.Id);
+            hasher.Add((int)creature.Weapon.Warhead);
+            hasher.Add(creature.Weapon.Damage);
+            hasher.Add(creature.Weapon.Range);
+            hasher.Add(creature.Weapon.CooldownTicks);
+        }
+
         hasher.Add(Economy.StartingCredits);
         hasher.Add(Economy.HarvestAmount);
         hasher.Add(Economy.HarvestIntervalTicks);
@@ -153,6 +186,8 @@ public sealed class GameContent
     public StructureDefinition Structure(int index) => Structures[index];
 
     public FactionDefinition Faction(int index) => Factions[index];
+
+    public CreatureDefinition Creature(int index) => Creatures[index];
 
     private static void Register(Dictionary<string, int> map, string id, int index, string kind)
     {
@@ -192,6 +227,15 @@ public sealed class GameContent
             if (structure.FreeUnitId is not null)
             {
                 UnitIndex(structure.FreeUnitId);
+            }
+        }
+
+        foreach (var creature in Creatures)
+        {
+            if (creature.Health <= 0 || creature.SpeedPerTick <= Fix64.Zero || creature.BiomassCost <= 0
+                || creature.Weapon.Damage <= 0 || creature.Weapon.CooldownTicks <= 0 || creature.Weapon.Range <= Fix64.Zero)
+            {
+                throw new InvalidOperationException($"Creature '{creature.Id}' has a non-positive health, speed, cost or weapon value.");
             }
         }
 

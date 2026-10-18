@@ -9,4 +9,10 @@ public enum Warhead : byte
     Flame = 3,
     Flak = 4,
     Energy = 5,
+
+    /// <summary>Maw spit: eats through structures, useless against other creatures.</summary>
+    Acid = 6,
+
+    /// <summary>Maw claws and jaws: tears infantry apart, weak against armour.</summary>
+    Rending = 7,
 }

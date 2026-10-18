@@ -6,6 +6,7 @@ using Ashfall.Session.Commands;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Commands;
+using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Players;
 
 namespace Ashfall.Session;
@@ -44,6 +45,12 @@ public sealed class HeadlessMatch : IAsyncDisposable
                 _sources.Insert(0, Turns);
             }
 
+            return;
+        }
+
+        if (spec.Mode == MatchMode.Swarm)
+        {
+            Simulation = CreateSwarm(spec);
             return;
         }
 
@@ -223,6 +230,24 @@ public sealed class HeadlessMatch : IAsyncDisposable
             }
         }
 
+        return simulation;
+    }
+
+    // One Bulwark fortress (player 0, idle) against a Maw spawner that keeps spec.Creatures alive. No victory condition:
+    // the run lasts a fixed number of ticks.
+    private static GameSimulation CreateSwarm(MatchSpec spec)
+    {
+        var content = GameContent.Standard;
+        var horde = new HordeSettings
+        {
+            CreatureType = content.CreatureIndex(MawContent.Skitter),
+            Population = spec.Creatures,
+            SpawnPerTick = 50,
+            MinimumDistance = 24,
+        };
+        var simulation = new GameSimulation(
+            spec.Seed, SwarmFortress.Create(), content, [new PlayerSetup(spec.Teams[0], BulwarkContent.FactionId)], victoryEnabled: false, horde);
+        SwarmFortress.Build(simulation, player: 0);
         return simulation;
     }
 

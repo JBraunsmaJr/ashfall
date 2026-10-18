@@ -14,9 +14,11 @@ internal sealed record HeadlessOptions
 
           --mode <mode>           proving (default): wandering units, fixed tick count
                                   skirmish: Bulwark skirmish between scripted AIs, run until a team wins
+                                  swarm: horde stress test, a Bulwark fortress against the Maw (M5)
           --seed <n>              Match seed (default 20261017)
           --ticks <n>             Proving: ticks to run (default 1800 = 2 minutes of game time)
                                   Skirmish: tick limit (default 54000 = 60 minutes); exit code 3 if no winner
+                                  Swarm: ticks to run (default 1800)
           --players <n>           Proving: players, 1-8 (default 2). Skirmish: 2-4 (3-4 play on the quad map)
           --teams <list>          Skirmish: team per player, e.g. 0,1,0,1 (default: free-for-all)
           --archetype <id>        Skirmish/host: play a generated map (crossroads or riverlands)
@@ -25,6 +27,8 @@ internal sealed record HeadlessOptions
                                   chokepoints, basespacing, vegetation); repeatable
           --map-code <code>       Generated map from a shareable map code (e.g. CRS-...)
           --units <n>             Proving only: units per player (default 100)
+          --creatures <n>         Swarm only: creatures the Maw keeps alive (default 5000)
+          --tick-budget-ms <ms>   Swarm only: fail (exit 6) if the mean tick time exceeds this
           --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
           --report-every <n>      Print a status report every n ticks (skirmish tuning)
@@ -50,7 +54,8 @@ internal sealed record HeadlessOptions
 
         Exit codes: 0 success, 1 hashes differed between repeats (or a replay mismatched),
                     2 invalid arguments, 3 skirmish reached the tick limit without a winner,
-                    4 peers desynced, 5 the network match failed or timed out.
+                    4 peers desynced, 5 the network match failed or timed out,
+                    6 the swarm run went over its tick budget.
         """;
 
     /// <summary>Skirmish tick limit when --ticks is not given: 60 minutes of game time.</summary>
@@ -70,6 +75,11 @@ internal sealed record HeadlessOptions
     public IReadOnlyList<int>? Teams { get; init; }
 
     public int Units { get; init; } = 100;
+
+    public int Creatures { get; init; } = MatchSpec.SwarmDefaultCreatures;
+
+    /// <summary>Swarm only: the largest acceptable mean tick time in milliseconds, or null for no limit.</summary>
+    public int? TickBudgetMs { get; init; }
 
     public int MapSize { get; init; } = 64;
 
@@ -147,13 +157,16 @@ internal sealed record HeadlessOptions
         }
     }
 
-    public MatchSpec ToMatchSpec() =>
-        Mode == MatchMode.Skirmish
-            ? (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap)
-            : MatchSpec.ProvingGround(Seed)
-                .WithPlayers(Players)
-                .WithUnitsPerPlayer(Units)
-                .WithMap(MapSize, MapSize);
+    public MatchSpec ToMatchSpec() => Mode switch
+    {
+        MatchMode.Skirmish =>
+            (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap),
+        MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures),
+        _ => MatchSpec.ProvingGround(Seed)
+            .WithPlayers(Players)
+            .WithUnitsPerPlayer(Units)
+            .WithMap(MapSize, MapSize),
+    };
 
     /// <summary>Parses arguments; returns null and sets <paramref name="error"/> when they are invalid.</summary>
     public static HeadlessOptions? Parse(IReadOnlyList<string> args, out string? error)
@@ -189,6 +202,8 @@ internal sealed record HeadlessOptions
                 "--players" => TryInt32(value, 1, v => options = options with { Players = v }),
                 "--teams" => TryTeams(value, v => options = options with { Teams = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),
+                "--creatures" => TryInt32(value, 0, v => options = options with { Creatures = v }) && options.Creatures <= MatchSpec.SwarmMaxCreatures,
+                "--tick-budget-ms" => TryInt32(value, 1, v => options = options with { TickBudgetMs = v }),
                 "--map" => TryInt32(value, 1, v => options = options with { MapSize = v }),
                 "--report-every" => TryInt64(value, 0, v => options = options with { ReportEvery = v }),
                 "--repeat" => TryInt32(value, 1, v => options = options with { Repeat = v }),
@@ -309,6 +324,9 @@ internal sealed record HeadlessOptions
                 return true;
             case "SKIRMISH":
                 apply(MatchMode.Skirmish);
+                return true;
+            case "SWARM":
+                apply(MatchMode.Swarm);
                 return true;
             default:
                 return false;

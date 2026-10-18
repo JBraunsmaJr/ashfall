@@ -3,11 +3,13 @@ using Ashfall.Core;
 using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Map;
 using Ashfall.Simulation.Navigation;
 using Ashfall.Simulation.Orders;
 using Ashfall.Simulation.Players;
 using Ashfall.Simulation.Production;
+using Ashfall.Simulation.Spatial;
 using Ashfall.Simulation.Systems;
 using Ashfall.Simulation.Vision;
 
@@ -19,6 +21,12 @@ namespace Ashfall.Simulation;
 /// </summary>
 public sealed class GameSimulation
 {
+    /// <summary>
+    /// The owner id of everything the Maw controls (GDD section 3). The Maw is not a player: it has no
+    /// <see cref="PlayerState"/>, and it is the enemy of every player and of nothing else.
+    /// </summary>
+    public const int MawPlayerId = -2;
+
     private readonly ISystem[] _systems;
     private readonly PlayerState[] _players;
     private Command[] _commandScratch = new Command[64];
@@ -30,12 +38,14 @@ public sealed class GameSimulation
     }
 
     /// <param name="victoryEnabled">When true, a player with no structures is defeated and the match ends when one team remains.</param>
+    /// <param name="horde">How the Maw spawns, or null for a match without a horde.</param>
     public GameSimulation(
         ulong seed,
         GridMap map,
         GameContent content,
         IReadOnlyList<PlayerSetup> players,
-        bool victoryEnabled = true)
+        bool victoryEnabled = true,
+        HordeSettings? horde = null)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(content);
@@ -48,6 +58,17 @@ public sealed class GameSimulation
         Random = new DeterministicRandom(seed);
         World = new World();
         Navigator = new Navigator(map);
+        Spatial = new SpatialGrid(map.Width, map.Height);
+        SwarmField = new FlowField(map);
+        if (horde is not null)
+        {
+            if (horde.CreatureType >= content.Creatures.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(horde), horde.CreatureType, "The horde's creature type is not in the content.");
+            }
+
+            Maw = new MawState(seed, horde);
+        }
         Visibility = new VisibilityMap(map.Width, map.Height, players.Count);
 
         _players = new PlayerState[players.Count];
@@ -68,6 +89,7 @@ public sealed class GameSimulation
         World.Register<UnitOrder>();
         World.Register<Harvester>();
         World.Register<Producer>();
+        World.Register<Creature>();
 
         // System order is fixed and identical on every peer.
         _systems =
@@ -76,8 +98,10 @@ public sealed class GameSimulation
             new ConstructionSystem(),
             new ProductionSystem(),
             new HarvestSystem(),
+            new HordeSpawnSystem(),
             new TargetingSystem(),
             new MovementSystem(),
+            new SwarmSystem(),
             new WeaponSystem(),
             new DeathSystem(),
             new VisionSystem(),
@@ -96,6 +120,18 @@ public sealed class GameSimulation
     public IReadOnlyList<PlayerState> Players => _players;
 
     public Navigator Navigator { get; }
+
+    /// <summary>Units and creatures bucketed by cell, rebuilt each tick before targeting. Derived, never hashed.</summary>
+    public SpatialGrid Spatial { get; }
+
+    /// <summary>
+    /// The swarm's flow field toward player structures. Derived from the map; call <see cref="RefreshSwarmField"/>
+    /// before reading it so it reflects the current structure layout.
+    /// </summary>
+    public FlowField SwarmField { get; }
+
+    /// <summary>The Maw's state in a match with a horde, or null.</summary>
+    public MawState? Maw { get; }
 
     /// <summary>Every player's fog of war, updated every <see cref="VisionSystem.Period"/> ticks.</summary>
     public VisibilityMap Visibility { get; }
@@ -151,6 +187,29 @@ public sealed class GameSimulation
         }
 
         return unit;
+    }
+
+    /// <summary>Creates a Maw creature of a content-defined type at a position. It joins the swarm next tick.</summary>
+    public Entity SpawnCreature(int creatureType, FixVec2 position)
+    {
+        var definition = Content.Creature(creatureType);
+        var creature = World.Create();
+        World.Add(creature, new Position(Bounds.Clamp(position)));
+        World.Add(creature, new Owner(MawPlayerId));
+        World.Add(creature, new Health(definition.Health, definition.Health, definition.Armor));
+        World.Add(creature, new Creature(creatureType, 0, Entity.None));
+        return creature;
+    }
+
+    /// <summary>Rebuilds <see cref="SwarmField"/> if the structure layout changed since it was built, and returns it.</summary>
+    public FlowField RefreshSwarmField()
+    {
+        if (SwarmField.BuiltForVersion != Map.StructureVersion)
+        {
+            SwarmField.Rebuild(this);
+        }
+
+        return SwarmField;
     }
 
     /// <summary>
@@ -256,10 +315,27 @@ public sealed class GameSimulation
         return false;
     }
 
-    /// <summary>True if the two owners are players on different teams. Units without a player are nobody's enemy.</summary>
-    public bool AreEnemies(int playerA, int playerB) =>
-        playerA >= 0 && playerB >= 0 && playerA < _players.Length && playerB < _players.Length
-        && _players[playerA].Team != _players[playerB].Team;
+    /// <summary>
+    /// True if the two owners are players on different teams, or one is the Maw and the other a player.
+    /// Units without a player are nobody's enemy.
+    /// </summary>
+    public bool AreEnemies(int playerA, int playerB)
+    {
+        if (playerA == MawPlayerId)
+        {
+            return IsPlayer(playerB);
+        }
+
+        if (playerB == MawPlayerId)
+        {
+            return IsPlayer(playerA);
+        }
+
+        return IsPlayer(playerA) && IsPlayer(playerB) && _players[playerA].Team != _players[playerB].Team;
+    }
+
+    /// <summary>True if <paramref name="owner"/> is one of this match's players (not the Maw, not neutral).</summary>
+    public bool IsPlayer(int owner) => owner >= 0 && owner < _players.Length;
 
     /// <summary>The point of <paramref name="target"/> closest to <paramref name="from"/>: its position, or the nearest point of a structure's footprint.</summary>
     public FixVec2 ClosestPointOf(Entity target, FixVec2 from)
@@ -340,6 +416,7 @@ public sealed class GameSimulation
         World.HashInto(ref hasher);
         Navigator.Paths.HashInto(ref hasher);
         Visibility.HashInto(ref hasher);
+        Maw?.HashInto(ref hasher); // after everything else, so matches without a horde hash exactly as before
         return hasher.Value;
     }
 

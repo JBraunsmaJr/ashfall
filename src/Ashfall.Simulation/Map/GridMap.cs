@@ -38,6 +38,12 @@ public sealed class GridMap
 
     public MapBounds Bounds => new(Width, Height);
 
+    /// <summary>
+    /// Bumped whenever a structure footprint is set or cleared, so caches of the structure layout (the swarm's flow
+    /// field) know to rebuild. Derived bookkeeping: not part of the state hash.
+    /// </summary>
+    public long StructureVersion { get; private set; }
+
     /// <summary>Total Cindrite left on the map, in credits.</summary>
     public long TotalCindrite { get; private set; }
 
@@ -85,6 +91,7 @@ public sealed class GridMap
 
     public void SetStructure(Cell origin, int width, int height, int entityIndex)
     {
+        StructureVersion++;
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < width; x++)

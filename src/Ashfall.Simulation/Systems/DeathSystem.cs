@@ -43,6 +43,11 @@ public sealed class DeathSystem : ISystem
                 }
             }
 
+            if (world.Has<Creature>(entity) && context.Simulation.Maw is { } maw)
+            {
+                maw.Killed++;
+            }
+
             context.Navigator.Paths.Clear(index);
             world.Destroy(entity);
         }

@@ -68,6 +68,44 @@ public class ContentTests
         Assert.Throws<InvalidOperationException>(() => new GameContent(badUnits, standard.Structures, standard.Factions, standard.Economy));
     }
 
+    [Theory]
+    [InlineData(20, Warhead.Flame, ArmorType.Biomass, 35)]
+    [InlineData(20, Warhead.Flame, ArmorType.Carapace, 5)]
+    [InlineData(40, Warhead.AntiArmour, ArmorType.Biomass, 8)]
+    [InlineData(40, Warhead.AntiArmour, ArmorType.Carapace, 40)]
+    [InlineData(8, Warhead.Rending, ArmorType.Biomass, 0)]
+    [InlineData(10, Warhead.Acid, ArmorType.Structure, 15)]
+    public void No_single_warhead_answers_the_maw(int baseDamage, Warhead warhead, ArmorType armor, int expected)
+    {
+        Assert.Equal(expected, DamageTable.Apply(baseDamage, warhead, armor));
+    }
+
+    [Fact]
+    public void The_standard_content_carries_the_maw_roster()
+    {
+        var content = GameContent.Standard;
+        var skitter = content.Creature(content.CreatureIndex(MawContent.Skitter));
+
+        Assert.Equal(ArmorType.Biomass, skitter.Armor);
+        Assert.Equal(Warhead.Rending, skitter.Weapon.Warhead);
+        Assert.True(skitter.SpeedPerTick > content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).SpeedPerTick, "Chaff must outrun infantry.");
+    }
+
+    [Fact]
+    public void Creatures_change_the_content_hash_and_invalid_creatures_are_rejected()
+    {
+        var standard = GameContent.Standard;
+        var withoutMaw = new GameContent(standard.Units, standard.Structures, standard.Factions, standard.Economy);
+        Assert.Empty(withoutMaw.Creatures);
+        Assert.NotEqual(standard.ComputeHash(), withoutMaw.ComputeHash());
+
+        var lame = standard.Creatures.Select(creature => creature with { SpeedPerTick = Fix64.Zero }).ToList();
+        Assert.Throws<InvalidOperationException>(() => withoutMaw.WithCreatures(lame));
+
+        var twice = standard.Creatures.Concat(standard.Creatures).ToList();
+        Assert.Throws<InvalidOperationException>(() => withoutMaw.WithCreatures(twice));
+    }
+
     [Fact]
     public void Unknown_ids_are_reported_by_name()
     {

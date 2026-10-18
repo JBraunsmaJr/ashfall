@@ -66,6 +66,14 @@ jobs:
           --hash-out generated-${{ runner.os }}.hash
           --checkpoints-out generated-${{ runner.os }}.checkpoints
 
+      - name: Horde stress (M5 gate) - 5,000 creatures twice, must match, mean tick within 25 ms
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode swarm --creatures 5000
+          --repeat 2 --tick-budget-ms 25
+          --hash-out swarm-${{ runner.os }}.hash
+          --checkpoints-out swarm-${{ runner.os }}.checkpoints
+
       - name: Map generation gate (M4) - slider sweeps on every archetype, all valid and fair
         run: >
           dotnet run --project tools/Ashfall.Tools.MapPreview -c Release --no-build --
@@ -86,6 +94,7 @@ jobs:
             proving-ground-${{ runner.os }}.*
             skirmish-${{ runner.os }}.*
             generated-${{ runner.os }}.*
+            swarm-${{ runner.os }}.*
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet

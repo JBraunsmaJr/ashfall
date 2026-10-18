@@ -39,6 +39,12 @@ public sealed class ComponentStore<T> : IComponentStore
     public bool Has(int entityIndex) =>
         (uint)entityIndex < (uint)_sparse.Length && _sparse[entityIndex] != 0;
 
+    /// <summary>
+    /// Position of the entity's component in the dense arrays (its place in iteration order), or -1 if it has none.
+    /// Lets a search over a subset of entities visit them in the same order a full iteration would.
+    /// </summary>
+    public int SlotOf(int entityIndex) => Has(entityIndex) ? _sparse[entityIndex] - 1 : -1;
+
     /// <summary>Reference to the component of <paramref name="entityIndex"/>; throws if it has none.</summary>
     public ref T Get(int entityIndex)
     {
