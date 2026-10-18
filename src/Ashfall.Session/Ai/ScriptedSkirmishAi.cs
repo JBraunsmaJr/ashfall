@@ -25,6 +25,9 @@ public sealed class ScriptedSkirmishAi : ICommandSource
     // Combat units this far from home are "in the field" and keep pushing toward the enemy.
     private const int HomeRadius = 14;
 
+    // In a Purge, units kept at home between the Maw's waves.
+    private const int PurgeHomeGuard = 6;
+
     private readonly int _playerId;
     private readonly int _waveSize;
     private readonly int _infantryPerTank;
@@ -34,6 +37,10 @@ public sealed class ScriptedSkirmishAi : ICommandSource
 
     // Credits held back this think for the next economic goal (a harvester or the next structure).
     private int _reserve;
+
+    // No harvester (none alive or paid for) and too little money to buy one: no income will ever come again, so
+    // there is nothing to save for. Everything goes into the army, and the army goes in.
+    private bool _starved;
 
     public ScriptedSkirmishAi(int playerId, ulong seed)
     {
@@ -67,6 +74,10 @@ public sealed class ScriptedSkirmishAi : ICommandSource
         }
 
         _reserve = 0;
+        var harvester = simulation.Content.UnitIndex(BulwarkContent.Harvester);
+        _starved = CountUnits(simulation, harvester) == 0
+            && QueuedAt(simulation, FindProducer(simulation, StructureRole.Factory), harvester) == 0
+            && !player.CanAfford(simulation.Content.Unit(harvester).Cost);
         Construct(simulation, player, home.Value, output);
         Train(simulation, player, output);
         Attack(simulation, home.Value, output);
@@ -74,7 +85,7 @@ public sealed class ScriptedSkirmishAi : ICommandSource
 
     private void Construct(GameSimulation simulation, PlayerState player, Cell home, List<Command> output)
     {
-        if (simulation.World.IsAlive(player.ConstructionSite))
+        if (simulation.World.IsAlive(player.ConstructionSite) || _starved)
         {
             return;
         }
@@ -148,7 +159,7 @@ public sealed class ScriptedSkirmishAi : ICommandSource
         var barracks = FindProducer(simulation, StructureRole.Barracks);
         var wantHarvester = CountUnits(simulation, harvesterType) + QueuedAt(simulation, factory, harvesterType) < _harvesterTarget;
 
-        if (!factory.IsNone && wantHarvester)
+        if (!factory.IsNone && wantHarvester && !_starved)
         {
             var cost = content.Unit(harvesterType).Cost;
             if (player.CanAfford(cost))
@@ -161,7 +172,7 @@ public sealed class ScriptedSkirmishAi : ICommandSource
             _reserve = Math.Max(_reserve, cost);
         }
 
-        if (!factory.IsNone && !wantHarvester && QueueCount(simulation, factory) < 2)
+        if (!factory.IsNone && (!wantHarvester || _starved) && QueueCount(simulation, factory) < 2)
         {
             TryTrain(simulation, player, factory, content.UnitIndex(BulwarkContent.Warden), output);
         }
@@ -245,19 +256,23 @@ public sealed class ScriptedSkirmishAi : ICommandSource
             }
         }
 
-        // All in: with no harvester and no way to train anything (too little money, or no barracks left), the
-        // army will never grow, so waiting for a full wave would stall the match forever. Send whatever is left.
-        var content = simulation.Content;
-        var broke = CountUnits(simulation, content.UnitIndex(BulwarkContent.Harvester)) == 0
-            && (FindProducer(simulation, StructureRole.Barracks).IsNone
-                || simulation.Players[_playerId].Credits < content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).Cost);
-        if (_idleAtHome.Count < (broke ? 1 : _waveSize))
+        // All in: with no income for good (starved), or no harvester and no barracks to train at, the army will not
+        // grow into a full wave, so waiting for one would stall the match forever. Send whatever is at home.
+        var broke = _starved
+            || (CountUnits(simulation, simulation.Content.UnitIndex(BulwarkContent.Harvester)) == 0
+                && FindProducer(simulation, StructureRole.Barracks).IsNone);
+
+        // Against the Maw the base is attacked in waves, so a home guard stays behind (unless there is nothing left
+        // to defend with): only what is at home beyond it goes out.
+        var guard = simulation.Goal == MatchGoal.Purge && !broke ? PurgeHomeGuard : 0;
+        if (_idleAtHome.Count - guard < (broke ? 1 : _waveSize))
         {
             return;
         }
 
-        foreach (var unit in _idleAtHome)
+        for (var i = guard; i < _idleAtHome.Count; i++)
         {
+            var unit = _idleAtHome[i];
             output.Add(Command.AttackMove(_playerId, unit, simulation.ClosestPointOf(target, world.Get<Position>(unit).Value)));
         }
     }

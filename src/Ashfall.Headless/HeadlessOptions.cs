@@ -15,20 +15,27 @@ internal sealed record HeadlessOptions
           --mode <mode>           proving (default): wandering units, fixed tick count
                                   skirmish: Bulwark skirmish between scripted AIs, run until a team wins
                                   swarm: horde stress test, a Bulwark fortress against the Maw (M5)
+                                  purge: co-op scripted AIs against Maw nests on a generated map, run until
+                                  the nests or the players are gone
           --seed <n>              Match seed (default 20261017)
           --ticks <n>             Proving: ticks to run (default 1800 = 2 minutes of game time)
                                   Skirmish: tick limit (default 54000 = 60 minutes); exit code 3 if no winner
                                   Swarm: ticks to run (default 1800)
+                                  Purge: tick limit (default 54000); exit code 3 if neither side won
           --players <n>           Proving: players, 1-8 (default 2). Skirmish: 2-4 (3-4 play on the quad map)
+                                  Purge: 1-4 (default 2)
           --teams <list>          Skirmish: team per player, e.g. 0,1,0,1 (default: free-for-all)
-          --archetype <id>        Skirmish/host: play a generated map (crossroads or riverlands)
+          --archetype <id>        Skirmish/purge/host: play a generated map (crossroads or riverlands;
+                                  a Purge defaults to crossroads)
           --map-seed <n>          Generated map seed (default: the match seed)
           --slider <name=value>   Generated map slider 0-100 (size, richness, elevation, water,
                                   chokepoints, basespacing, vegetation); repeatable
           --map-code <code>       Generated map from a shareable map code (e.g. CRS-...)
           --units <n>             Proving only: units per player (default 100)
-          --creatures <n>         Swarm only: creatures the Maw keeps alive (default 5000)
-          --nests <n>             Swarm only: breed from n Spawning Pits (0-8) instead of the map edges
+          --creatures <n>         Swarm: creatures the Maw keeps alive (default 5000)
+                                  Purge: the most alive at once (default 1500)
+          --nests <n>             Swarm: breed from n Spawning Pits (0-8) instead of the map edges
+                                  Purge: Spawning Pits on the map's fields (1-12, default 4)
           --tick-budget-ms <ms>   Swarm only: fail (exit 6) if the mean tick time exceeds this
           --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
@@ -54,7 +61,7 @@ internal sealed record HeadlessOptions
           --timeout <seconds>     Give up on a network match after this long (default 600)
 
         Exit codes: 0 success, 1 hashes differed between repeats (or a replay mismatched),
-                    2 invalid arguments, 3 skirmish reached the tick limit without a winner,
+                    2 invalid arguments, 3 skirmish or purge reached the tick limit without a winner,
                     4 peers desynced, 5 the network match failed or timed out,
                     6 the swarm run went over its tick budget.
         """;
@@ -69,7 +76,7 @@ internal sealed record HeadlessOptions
     /// <summary>Explicit --ticks value, if given.</summary>
     public long? TicksOption { get; init; }
 
-    public long Ticks => TicksOption ?? (Mode == MatchMode.Skirmish ? DefaultSkirmishTickLimit : ProvingGround.DefaultTicks);
+    public long Ticks => TicksOption ?? (Mode is MatchMode.Skirmish or MatchMode.Purge ? DefaultSkirmishTickLimit : ProvingGround.DefaultTicks);
 
     public int Players { get; init; } = 2;
 
@@ -77,9 +84,11 @@ internal sealed record HeadlessOptions
 
     public int Units { get; init; } = 100;
 
-    public int Creatures { get; init; } = MatchSpec.SwarmDefaultCreatures;
+    /// <summary>Explicit --creatures value, if given (the default depends on the mode).</summary>
+    public int? Creatures { get; init; }
 
-    public int Nests { get; init; }
+    /// <summary>Explicit --nests value, if given (the default depends on the mode).</summary>
+    public int? Nests { get; init; }
 
     /// <summary>Swarm only: the largest acceptable mean tick time in milliseconds, or null for no limit.</summary>
     public int? TickBudgetMs { get; init; }
@@ -145,12 +154,12 @@ internal sealed record HeadlessOptions
                 return MapCode;
             }
 
-            if (Archetype is null)
+            if (Archetype is null && (Mode != MatchMode.Purge || (MapSeed is null && Sliders.Count == 0)))
             {
-                return null;
+                return null; // a Purge then plays the default map for its seed
             }
 
-            var settings = new MapSettings(Archetype, MapSeed ?? (uint)(Seed & uint.MaxValue));
+            var settings = new MapSettings(Archetype ?? MapArchetypes.Crossroads, MapSeed ?? (uint)(Seed & uint.MaxValue));
             foreach (var (slider, value) in Sliders)
             {
                 settings = settings.With(slider, value);
@@ -164,7 +173,8 @@ internal sealed record HeadlessOptions
     {
         MatchMode.Skirmish =>
             (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap),
-        MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures, Nests),
+        MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures ?? MatchSpec.SwarmDefaultCreatures, Nests ?? 0),
+        MatchMode.Purge => MatchSpec.Purge(Seed, Players, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, GeneratedMap),
         _ => MatchSpec.ProvingGround(Seed)
             .WithPlayers(Players)
             .WithUnitsPerPlayer(Units)
@@ -206,7 +216,7 @@ internal sealed record HeadlessOptions
                 "--teams" => TryTeams(value, v => options = options with { Teams = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),
                 "--creatures" => TryInt32(value, 0, v => options = options with { Creatures = v }) && options.Creatures <= MatchSpec.SwarmMaxCreatures,
-                "--nests" => TryInt32(value, 0, v => options = options with { Nests = v }) && options.Nests <= MatchSpec.SwarmMaxNests,
+                "--nests" => TryInt32(value, 0, v => options = options with { Nests = v }) && options.Nests <= MatchSpec.PurgeMaxNests,
                 "--tick-budget-ms" => TryInt32(value, 1, v => options = options with { TickBudgetMs = v }),
                 "--map" => TryInt32(value, 1, v => options = options with { MapSize = v }),
                 "--report-every" => TryInt64(value, 0, v => options = options with { ReportEvery = v }),
@@ -226,10 +236,10 @@ internal sealed record HeadlessOptions
                 "--input-delay" => TryInt32(value, 0, v => options = options with { InputDelay = v }),
                 "--lan" => TryInt32(value, 2, v => options = options with { Lan = v, Mode = MatchMode.Skirmish }),
                 "--timeout" => TryInt32(value, 1, v => options = options with { TimeoutSeconds = v }),
-                "--archetype" => MapArchetypes.Find(value) is { } archetype && Set(() => options = options with { Archetype = archetype, Mode = MatchMode.Skirmish }),
+                "--archetype" => MapArchetypes.Find(value) is { } archetype && Set(() => options = options with { Archetype = archetype, Mode = MapMode(options.Mode) }),
                 "--map-seed" => TryInt64(value, 0, v => options = options with { MapSeed = (uint)(v & uint.MaxValue) }),
                 "--slider" => TrySlider(value, v => options = options with { Sliders = [.. options.Sliders, v] }),
-                "--map-code" => MapSettings.TryParseCode(value, out var code) && Set(() => options = options with { MapCode = code, Mode = MatchMode.Skirmish }),
+                "--map-code" => MapSettings.TryParseCode(value, out var code) && Set(() => options = options with { MapCode = code, Mode = MapMode(options.Mode) }),
                 _ => false,
             };
 
@@ -319,10 +329,16 @@ internal sealed record HeadlessOptions
         return true;
     }
 
+    // A generated-map option implies a skirmish unless the mode already plays generated maps.
+    private static MatchMode MapMode(MatchMode current) => current == MatchMode.Purge ? MatchMode.Purge : MatchMode.Skirmish;
+
     private static bool TryMode(string text, Action<MatchMode> apply)
     {
         switch (text.ToUpperInvariant())
         {
+            case "PURGE":
+                apply(MatchMode.Purge);
+                return true;
             case "PROVING":
                 apply(MatchMode.ProvingGround);
                 return true;

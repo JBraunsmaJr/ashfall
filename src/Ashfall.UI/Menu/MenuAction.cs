@@ -7,4 +7,7 @@ public enum MenuAction
     Host,
     Join,
     Quit,
+
+    /// <summary>A co-op Purge against the Maw, with AI allies.</summary>
+    Purge,
 }

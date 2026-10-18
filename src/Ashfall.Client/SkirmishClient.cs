@@ -132,9 +132,7 @@ internal static class SkirmishClient
             Console.WriteLine($"Saved {capture.Size} screenshot to {options.Screenshot}.");
         }
 
-        var result = match.IsOver
-            ? match.WinningTeam >= 0 ? $"team {match.WinningTeam} won" : "draw"
-            : "in progress";
+        var result = match.IsOver ? MatchReport.Outcome(match.Simulation) : "in progress";
         Console.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
             $"Presented {renderer.FramesPresented} frames at {renderer.RenderSize} in {clock.Elapsed.TotalSeconds:F1}s ({renderer.LastQuadCount} quads in the last); " +

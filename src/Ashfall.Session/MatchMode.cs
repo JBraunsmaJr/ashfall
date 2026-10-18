@@ -15,4 +15,11 @@ public enum MatchMode
     /// deterministic and fits the tick budget.
     /// </summary>
     Swarm,
+
+    /// <summary>
+    /// Co-op Purge (GDD section 2), the way Ashfall is meant to be played: 1–4 Bulwark players on one team, each with
+    /// a Construction Yard on a generated map, against Maw nests breeding on the Cindrite fields. The players win when
+    /// every nest is destroyed; the Maw wins when every player has lost all their structures.
+    /// </summary>
+    Purge,
 }

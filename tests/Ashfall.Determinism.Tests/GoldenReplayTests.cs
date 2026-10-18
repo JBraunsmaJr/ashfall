@@ -14,6 +14,8 @@ namespace Ashfall.Determinism.Tests;
 /// <item><b>swarm</b> (M5): 1,000 Maw creatures against the Bulwark fortress for one minute.</item>
 /// <item><b>nests</b> (M5): four Spawning Pits on regrowing Cindrite breeding against the fortress for four minutes,
 /// evolving into Brood Nests that add Spitters.</item>
+/// <item><b>purge</b>: the co-op Purge, two scripted allies against four nests on a generated Crossroads map, played
+/// until the players have destroyed every nest (brooding, waves, the Purge victory).</item>
 /// </list>
 /// <c>maps.hashes</c> pins the generator itself: map code, player count and the grid's hash.
 /// </summary>
@@ -25,6 +27,7 @@ namespace Ashfall.Determinism.Tests;
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode skirmish --players 4 --teams 0,1,0,1 --map-code RIV-20000Z-N5NJHJ-TM6XWS --hash-out tests/Ashfall.Determinism.Tests/Golden/generated.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/generated.checkpoints
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode swarm --creatures 1000 --ticks 900 --hash-out tests/Ashfall.Determinism.Tests/Golden/swarm.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/swarm.checkpoints
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode swarm --nests 4 --ticks 3600 --hash-out tests/Ashfall.Determinism.Tests/Golden/nests.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/nests.checkpoints
+/// dotnet run --project src/Ashfall.Headless -c Release -- --mode purge --players 2 --seed 1 --hash-out tests/Ashfall.Determinism.Tests/Golden/purge.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/purge.checkpoints
 /// dotnet run --project tools/Ashfall.Tools.MapPreview -c Release -- --code CODE --players N   (prints the hash for maps.hashes)
 /// </code>
 /// and say why in the commit message. Never regenerate them to make an unexplained failure go away.
@@ -44,7 +47,12 @@ public class GoldenReplayTests
 
     public const long NestTicks = 3_600;
 
-    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish", "generated", "swarm", "nests" };
+    /// <summary>The Purge reference match: this seed and player count (scripted allies who win).</summary>
+    public const ulong PurgeSeed = 1;
+
+    public const int PurgePlayers = 2;
+
+    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish", "generated", "swarm", "nests", "purge" };
 
     [Fact]
     public void Generated_maps_match_their_golden_hashes()
@@ -108,6 +116,12 @@ public class GoldenReplayTests
             var spec = MatchSpec.Skirmish(ProvingGround.DefaultSeed, 4).WithTeams(0, 1, 0, 1).WithGeneratedMap(map);
             await using var generated = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled);
             return await generated.RunToCompletionAsync(MatchSpec.SkirmishTickLimit, cancellation);
+        }
+
+        if (replay == "purge")
+        {
+            await using var purge = await HeadlessMatch.StartAsync(MatchSpec.Purge(PurgeSeed, PurgePlayers), GameSpeed.Unthrottled);
+            return await purge.RunToCompletionAsync(MatchSpec.SkirmishTickLimit, cancellation);
         }
 
         if (replay == "nests")

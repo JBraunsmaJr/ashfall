@@ -8,7 +8,9 @@ namespace Ashfall.Simulation.Systems;
 /// <summary>
 /// Decides what every armed unit is shooting at and where it needs to be:
 /// keeps explicit Attack targets, lets idle and attack-moving units pick the nearest enemy in
-/// acquisition range, closes to weapon range, and resumes an attack-move when its target dies.
+/// acquisition range (units and creatures before structures, and a structure they picked is dropped
+/// when a unit or creature comes into range), closes to weapon range, and resumes an attack-move when
+/// its target dies.
 /// </summary>
 public sealed class TargetingSystem : ISystem
 {
@@ -51,11 +53,16 @@ public sealed class TargetingSystem : ISystem
                 armament.Target = order.Target;
             }
 
-            if (armament.Target.IsNone
-                && order.Kind is OrderKind.Idle or OrderKind.AttackMove
-                && context.IsStaggeredTick(unit.Index, ScanPeriod))
+            if (order.Kind is OrderKind.Idle or OrderKind.AttackMove
+                && context.IsStaggeredTick(unit.Index, ScanPeriod)
+                && (armament.Target.IsNone || world.Has<StructureInfo>(armament.Target)))
             {
-                armament.Target = FindNearestEnemy(context, _candidates, owner, position, definition.AcquisitionRange);
+                // A building it picked for itself is dropped as soon as something that fights back comes into range.
+                var found = FindNearestEnemy(context, _candidates, owner, position, definition.AcquisitionRange, structures: armament.Target.IsNone);
+                if (!found.IsNone || armament.Target.IsNone)
+                {
+                    armament.Target = found;
+                }
             }
 
             if (!armament.Target.IsNone)
@@ -125,7 +132,9 @@ public sealed class TargetingSystem : ISystem
     /// (units and creatures near the scanner) and the structure list, then are sorted back into store order, so
     /// the answer is exactly what a scan of every entity would give, at a fraction of the cost.
     /// </remarks>
-    internal static Entity FindNearestEnemy(in TickContext context, List<Candidate> candidates, int owner, FixVec2 position, Fix64 range)
+    /// <param name="structures">False to consider only units and creatures.</param>
+    internal static Entity FindNearestEnemy(
+        in TickContext context, List<Candidate> candidates, int owner, FixVec2 position, Fix64 range, bool structures = true)
     {
         var world = context.World;
         var simulation = context.Simulation;
@@ -134,8 +143,7 @@ public sealed class TargetingSystem : ISystem
         var rangeSquared = range * range;
         candidates.Clear();
 
-        var structures = world.Store<StructureInfo>();
-        foreach (var index in structures.EntityIndices)
+        foreach (var index in structures ? world.Store<StructureInfo>().EntityIndices : [])
         {
             if (!simulation.AreEnemies(owner, owners.Get(index).PlayerId))
             {

@@ -10,7 +10,9 @@ namespace Ashfall.Simulation.Systems;
 /// <summary>
 /// Moves and fights for every Maw creature (GDD section 12, "the swarm path"). Each tick a creature either
 /// attacks its target (a player unit that came within its aggro range, or a player structure it touches),
-/// chases a unit it has noticed, or steps along the flow field toward the nearest player structure.
+/// chases a unit it has noticed, or steps along the flow field toward the nearest player structure. A brooding
+/// creature (see <see cref="Creature.Brooding"/>) instead keeps to its place by its nest until the wave goes,
+/// fighting only units that come near; if its nest dies, it marches at once.
 /// </summary>
 /// <remarks>
 /// <para>No creature pathfinds: the shared <see cref="FlowField"/> gives every cell's walking cost to the
@@ -28,11 +30,17 @@ public sealed class SwarmSystem : ISystem
     // Ticks between a creature's looks around for units to attack (staggered across creatures).
     private const int ScanPeriod = 6;
 
+    // A brooding creature attacks player units this close to its nest's centre.
+    private static readonly Fix64 GuardRadius = Fix64.FromInt(9);
+
     private static readonly (int Dx, int Dy, int Cost)[] Neighbours =
     [
         (1, 0, FlowField.StraightCost), (0, 1, FlowField.StraightCost), (-1, 0, FlowField.StraightCost), (0, -1, FlowField.StraightCost),
         (1, 1, FlowField.DiagonalCost), (-1, 1, FlowField.DiagonalCost), (-1, -1, FlowField.DiagonalCost), (1, -1, FlowField.DiagonalCost),
     ];
+
+    // Where brooding creatures wait, relative to their nest's mouth: anywhere within four cells of it.
+    private static readonly (int Dx, int Dy)[] Roosts = BuildRoosts();
 
     private int[] _occupancy = [];
 
@@ -82,9 +90,17 @@ public sealed class SwarmSystem : ISystem
                 creature.Target = Entity.None;
             }
 
+            if (creature.Brooding && !(world.IsAlive(creature.Home) && world.Has<Nest>(creature.Home)))
+            {
+                creature.Brooding = false; // its nest is gone: nothing left to guard
+            }
+
             if (creature.Target.IsNone && context.IsStaggeredTick(index, ScanPeriod))
             {
-                creature.Target = FindUnitInReach(simulation, position.Value, definition.AggroRange);
+                // A brood guards its nest: it goes for any unit near the nest, not just near itself.
+                creature.Target = creature.Brooding
+                    ? FindUnitInReach(simulation, world.Get<Position>(creature.Home).Value, GuardRadius)
+                    : FindUnitInReach(simulation, position.Value, definition.AggroRange);
             }
 
             if (!creature.Target.IsNone && Engage(simulation, definition, ref creature, ref position))
@@ -92,8 +108,88 @@ public sealed class SwarmSystem : ISystem
                 continue;
             }
 
+            if (creature.Brooding)
+            {
+                Roost(simulation, definition, index, creature.Home, ref position);
+                continue;
+            }
+
             FollowField(simulation, field, definition, index, ref creature, ref position);
         }
+    }
+
+    // Walks to (or stays at) this creature's place in the brood around its nest's mouth (the exit cell, where it was
+    // born). Away from that place it takes the open neighbouring cell nearest to it, so a crowd at the mouth spreads
+    // out cell by cell instead of queueing behind one full cell.
+    private void Roost(GameSimulation simulation, CreatureDefinition definition, int index, Entity home, ref Position position)
+    {
+        var map = simulation.Map;
+        var mouth = simulation.ExitCell(simulation.World.Get<StructureInfo>(home));
+        var (dx, dy) = Roosts[index % Roosts.Length];
+        var roost = new Cell(mouth.X + dx, mouth.Y + dy);
+        var cell = Cell.Containing(position.Value);
+        if (cell == roost)
+        {
+            var point = roost.Center + Jitter(index);
+            if (position.Value != point)
+            {
+                TryStepToward(map, ref position, point, definition);
+            }
+
+            return;
+        }
+
+        var best = cell;
+        var bestDistance = Distance(cell, roost);
+        foreach (var (nx, ny, _) in Neighbours)
+        {
+            var next = new Cell(cell.X + nx, cell.Y + ny);
+            var distance = Distance(next, roost);
+            if (distance < bestDistance && map.InBounds(next) && map.IsPassable(next)
+                && _occupancy[map.IndexOf(next)] + definition.CellWeight <= CellCapacity)
+            {
+                best = next;
+                bestDistance = distance;
+            }
+        }
+
+        if (best != cell)
+        {
+            TryStepToward(map, ref position, best.Center + Jitter(index), definition);
+        }
+    }
+
+    private static int Distance(Cell a, Cell b) => ((a.X - b.X) * (a.X - b.X)) + ((a.Y - b.Y) * (a.Y - b.Y));
+
+    private static (int Dx, int Dy)[] BuildRoosts()
+    {
+        var roosts = new List<(int Dx, int Dy)>();
+        for (var dy = -4; dy <= 4; dy++)
+        {
+            for (var dx = -4; dx <= 4; dx++)
+            {
+                var distance = (dx * dx) + (dy * dy);
+                if (distance >= 1 && distance <= 16)
+                {
+                    roosts.Add((dx, dy));
+                }
+            }
+        }
+
+        // Spread consecutive entity indices around the ring rather than along one row of it.
+        var spread = new (int Dx, int Dy)[roosts.Count];
+        var stride = 7;
+        while (System.Numerics.BigInteger.GreatestCommonDivisor(stride, roosts.Count) != 1)
+        {
+            stride++; // coprime with the ring's size, so every place is used once
+        }
+
+        for (var i = 0; i < roosts.Count; i++)
+        {
+            spread[i] = roosts[i * stride % roosts.Count];
+        }
+
+        return spread;
     }
 
     /// <summary>

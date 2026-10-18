@@ -5,7 +5,7 @@ using Ashfall.Session;
 namespace Ashfall.UI.Menu;
 
 /// <summary>
-/// What the menus remember between launches: your name, the last skirmish and host setup, and the
+/// What the menus remember between launches: your name, the last Purge, skirmish and host setup, and the
 /// hosts you joined recently. Stored as plain <c>key=value</c> lines next to the network identity.
 /// </summary>
 public sealed record MenuSettings
@@ -24,6 +24,12 @@ public sealed record MenuSettings
     public int Ais { get; init; }
 
     public int Port { get; init; } = HostAddress.DefaultPort;
+
+    /// <summary>Purge: scripted-AI allies on your team (0-3).</summary>
+    public int PurgeAllies { get; init; } = 1;
+
+    /// <summary>Purge: the Maw's Spawning Pits.</summary>
+    public int PurgeNests { get; init; } = MatchSpec.PurgeDefaultNests;
 
     /// <summary>The generated map for skirmish and hosting, or null for the hand-made map.</summary>
     public MapSettings? Map { get; init; } = MapSettings.Default(MapArchetypes.Crossroads, 1);
@@ -51,6 +57,8 @@ public sealed record MenuSettings
             "humans=" + Humans.ToString(CultureInfo.InvariantCulture),
             "ais=" + Ais.ToString(CultureInfo.InvariantCulture),
             "port=" + Port.ToString(CultureInfo.InvariantCulture),
+            "allies=" + PurgeAllies.ToString(CultureInfo.InvariantCulture),
+            "nests=" + PurgeNests.ToString(CultureInfo.InvariantCulture),
             "map=" + (Map?.ToCode() ?? "hand-made"),
         };
         lines.AddRange(RecentHosts.Select(h => "recent=" + h));
@@ -91,6 +99,12 @@ public sealed record MenuSettings
                     break;
                 case "port" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is >= 1 and <= 65535:
                     settings = settings with { Port = port };
+                    break;
+                case "allies" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var allies) && allies < MatchSpec.PurgeMaxPlayers:
+                    settings = settings with { PurgeAllies = allies };
+                    break;
+                case "nests" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var nests) && nests is >= 1 and <= MatchSpec.PurgeMaxNests:
+                    settings = settings with { PurgeNests = nests };
                     break;
                 case "map" when value == "hand-made":
                     settings = settings with { Map = null };

@@ -3,8 +3,10 @@ using Ashfall.Content;
 namespace Ashfall.Simulation.Systems;
 
 /// <summary>
-/// Default victory condition (GDD section 2): a player with no structures left (walls do not count) is defeated;
-/// the match is over when at most one team still has an undefeated player.
+/// Victory conditions (GDD section 2). Either way a player with no structures left (walls do not count) is defeated.
+/// <see cref="MatchGoal.Elimination"/>: the match is over when at most one team still has an undefeated player.
+/// <see cref="MatchGoal.Purge"/>: the players win once no Maw nest is left, and the Maw wins once every player is
+/// defeated.
 /// </summary>
 public sealed class VictorySystem : ISystem
 {
@@ -52,10 +54,40 @@ public sealed class VictorySystem : ISystem
             }
         }
 
+        if (simulation.Goal == MatchGoal.Purge)
+        {
+            if (_survivingTeams.Count == 0)
+            {
+                simulation.IsOver = true;
+                simulation.WinningTeam = GameSimulation.MawTeam;
+            }
+            else if (!AnyNestStands(context))
+            {
+                simulation.IsOver = true;
+                simulation.WinningTeam = _survivingTeams[0];
+            }
+
+            return;
+        }
+
         if (_survivingTeams.Count <= 1)
         {
             simulation.IsOver = true;
             simulation.WinningTeam = _survivingTeams.Count == 1 ? _survivingTeams[0] : -1;
         }
+    }
+
+    private static bool AnyNestStands(in TickContext context)
+    {
+        var health = context.World.Store<Health>();
+        foreach (var index in context.World.Store<Nest>().EntityIndices)
+        {
+            if (!health.Get(index).IsDead)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

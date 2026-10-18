@@ -27,6 +27,9 @@ public sealed class GameSimulation
     /// </summary>
     public const int MawPlayerId = -2;
 
+    /// <summary>The <see cref="WinningTeam"/> of a Purge the Maw won.</summary>
+    public const int MawTeam = -2;
+
     private readonly ISystem[] _systems;
     private readonly PlayerState[] _players;
     private Command[] _commandScratch = new Command[64];
@@ -39,6 +42,7 @@ public sealed class GameSimulation
 
     /// <param name="victoryEnabled">When true, a player with no structures is defeated and the match ends when one team remains.</param>
     /// <param name="horde">How the Maw spawns, or null for a match without a horde.</param>
+    /// <param name="goal">How the match is won when <paramref name="victoryEnabled"/> is true.</param>
     /// <param name="cindriteRegrowth">
     /// When true, harvested Cindrite fields grow back from their fissures (see <see cref="CindriteRegrowthSystem"/>).
     /// Every real match has it; it is off by default so rule tests can count Cindrite exactly.
@@ -50,7 +54,8 @@ public sealed class GameSimulation
         IReadOnlyList<PlayerSetup> players,
         bool victoryEnabled = true,
         HordeSettings? horde = null,
-        bool cindriteRegrowth = false)
+        bool cindriteRegrowth = false,
+        MatchGoal goal = MatchGoal.Elimination)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(content);
@@ -61,6 +66,7 @@ public sealed class GameSimulation
         Content = content;
         VictoryEnabled = victoryEnabled;
         CindriteRegrowth = cindriteRegrowth;
+        Goal = goal;
         Random = new DeterministicRandom(seed);
         World = new World();
         Navigator = new Navigator(map);
@@ -147,6 +153,9 @@ public sealed class GameSimulation
 
     public bool VictoryEnabled { get; }
 
+    /// <summary>How the match is won. Fixed when the match is created.</summary>
+    public MatchGoal Goal { get; }
+
     /// <summary>Whether Cindrite fields grow back in this match. Fixed when the match is created.</summary>
     public bool CindriteRegrowth { get; }
 
@@ -161,10 +170,13 @@ public sealed class GameSimulation
     /// <summary>Commands rejected so far (invalid, unaffordable, not your unit). Part of the state hash.</summary>
     public long RejectedCommands { get; private set; }
 
-    /// <summary>True once at most one team has undefeated players.</summary>
+    /// <summary>True once the match has a result: one team left standing, or (Purge) the nests or the players all gone.</summary>
     public bool IsOver { get; internal set; }
 
-    /// <summary>The team that won, or -1 while the match runs (or if everyone lost at once).</summary>
+    /// <summary>
+    /// The team that won, <see cref="MawTeam"/> if the Maw overran a Purge, or -1 while the match runs (or if everyone
+    /// lost at once).
+    /// </summary>
     public int WinningTeam { get; internal set; } = -1;
 
     /// <summary>Creates a bare mover with no content definition (the M0 proving ground's units).</summary>
@@ -202,14 +214,17 @@ public sealed class GameSimulation
     }
 
     /// <summary>Creates a Maw creature of a content-defined type at a position. It joins the swarm next tick.</summary>
-    public Entity SpawnCreature(int creatureType, FixVec2 position)
+    public Entity SpawnCreature(int creatureType, FixVec2 position) => SpawnCreature(creatureType, position, Entity.None, brooding: false);
+
+    /// <summary>Spawns a creature bred by <paramref name="home"/>; a brooding one waits by its nest for the next wave.</summary>
+    public Entity SpawnCreature(int creatureType, FixVec2 position, Entity home, bool brooding)
     {
         var definition = Content.Creature(creatureType);
         var creature = World.Create();
         World.Add(creature, new Position(Bounds.Clamp(position)));
         World.Add(creature, new Owner(MawPlayerId));
         World.Add(creature, new Health(definition.Health, definition.Health, definition.Armor));
-        World.Add(creature, new Creature(creatureType, 0, Entity.None));
+        World.Add(creature, new Creature(creatureType, 0, Entity.None, home, brooding));
         return creature;
     }
 

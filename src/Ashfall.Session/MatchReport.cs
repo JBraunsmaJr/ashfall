@@ -60,8 +60,31 @@ public static class MatchReport
             }
         }
 
+        if (simulation.Maw is { } maw)
+        {
+            var nests = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            foreach (var index in world.Store<Nest>().EntityIndices)
+            {
+                var name = content.Structure(world.Store<StructureInfo>().Get(index).StructureType).Name;
+                nests[name] = nests.GetValueOrDefault(name) + 1;
+            }
+
+            text.Append(CultureInfo.InvariantCulture,
+                $"\n  the Maw: nests {Join(nests)}; creatures {world.Store<Creature>().Count} alive, {maw.Spawned} spawned, {maw.Killed} killed");
+        }
+
         text.Append(CultureInfo.InvariantCulture, $"\n  rejected commands: {simulation.RejectedCommands}");
         return text.ToString();
+    }
+
+    /// <summary>The result of a finished match in words: "team 0 won", "the players purged the Maw", "draw".</summary>
+    public static string Outcome(GameSimulation simulation)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        return !simulation.IsOver ? "no result yet"
+            : simulation.Goal == MatchGoal.Purge
+                ? simulation.WinningTeam == GameSimulation.MawTeam ? "the Maw overran the players" : "the players purged every nest"
+                : simulation.WinningTeam >= 0 ? string.Create(CultureInfo.InvariantCulture, $"team {simulation.WinningTeam} won") : "draw";
     }
 
     /// <summary>Counts of units per standing order, useful when diagnosing stuck armies.</summary>

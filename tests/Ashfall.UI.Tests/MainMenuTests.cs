@@ -267,6 +267,36 @@ public class MainMenuTests
         Assert.False(slow.Screen.ExitRequested);
     }
 
+    [Fact]
+    public void Purge_leads_the_main_menu_and_starts_a_coop_game_on_a_generated_map()
+    {
+        var menu = new MenuDriver(new MenuSettings { Map = null, PurgeAllies = 1, PurgeNests = 4 });
+        Assert.Equal("PURGE", menu.Screen.Targets.First().Label);
+        menu.Press(Key.Enter); // the primary button on the title screen
+        Assert.Equal("Purge", menu.Screen.CurrentPage);
+
+        // A Purge needs a generated map: the hand-made one is not offered, and one is picked on arrival.
+        Assert.DoesNotContain(menu.Screen.Targets, target => target.Label == "HAND-MADE");
+        Assert.NotNull(menu.Screen.Map);
+
+        // AI ALLIES and NESTS each have a - and a + (in that order).
+        menu.Click("+", 0);
+        menu.Click("+", 0);
+        Assert.False(menu.Enabled("+", 0)); // four players in all is the most
+        menu.Click("-", 1);
+        menu.Click("START");
+
+        var choice = Assert.IsType<MenuChoice>(menu.Screen.Choice);
+        Assert.Equal(MenuAction.Purge, choice.Action);
+        Assert.Equal(3, choice.Settings.PurgeAllies);
+        Assert.Equal(3, choice.Settings.PurgeNests);
+        Assert.NotNull(choice.Settings.Map);
+
+        var reloaded = MenuSettings.Parse(choice.Settings.Serialize());
+        Assert.Equal((3, 3), (reloaded.PurgeAllies, reloaded.PurgeNests));
+        Assert.Equal((1, 4), (MenuSettings.Parse("allies=9\nnests=0\n").PurgeAllies, MenuSettings.Parse("allies=9\nnests=0\n").PurgeNests));
+    }
+
     /// <summary>Drives the menu with clicks and typing, one frame at a time.</summary>
     private sealed class MenuDriver
     {

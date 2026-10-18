@@ -10,9 +10,10 @@ using Ashfall.UI.Text;
 namespace Ashfall.UI.Menu;
 
 /// <summary>
-/// The title screen: start a skirmish, host a lobby or join one by address, without any command-line
-/// flags. Skirmish and Host also pick the map: hand-made, or a generated archetype with its seed and
-/// sliders, previewed live as they change. Each page is laid out fresh every frame from the same widget
+/// The title screen: start a co-op Purge against the Maw or a skirmish, host a lobby or join one by
+/// address, without any command-line flags. Purge, Skirmish and Host also pick the map: a generated
+/// archetype with its seed and sliders (or, outside a Purge, the hand-made map), previewed live as
+/// they change. Each page is laid out fresh every frame from the same widget
 /// list that handles clicks, so what is drawn is exactly what can be clicked. Tab moves between text
 /// boxes, Enter confirms, Esc goes back.
 /// </summary>
@@ -36,6 +37,8 @@ public sealed class MainMenuScreen
     private bool _idleOpponent;
     private int _humans;
     private int _ais;
+    private int _allies;
+    private int _nests;
     private MapSlider? _dragging;
     private Vector2 _framebuffer = new(1280, 720);
     private Vector2 _mouse;
@@ -53,6 +56,8 @@ public sealed class MainMenuScreen
         _idleOpponent = settings.IdleOpponent;
         _humans = settings.Humans;
         _ais = settings.Ais;
+        _allies = settings.PurgeAllies;
+        _nests = settings.PurgeNests;
         SetMap(settings.Map);
         Message = message;
     }
@@ -60,6 +65,7 @@ public sealed class MainMenuScreen
     private enum Page
     {
         Main,
+        Purge,
         Skirmish,
         Host,
         Join,
@@ -71,7 +77,7 @@ public sealed class MainMenuScreen
     /// <summary>A line shown under the main buttons, e.g. why the last connection failed.</summary>
     public string? Message { get; set; }
 
-    /// <summary>The page on screen: Main, Skirmish, Host or Join.</summary>
+    /// <summary>The page on screen: Main, Purge, Skirmish, Host or Join.</summary>
     public string CurrentPage => _page.ToString();
 
     /// <summary>The live map preview on the Skirmish and Host pages.</summary>
@@ -91,6 +97,8 @@ public sealed class MainMenuScreen
         Humans = _humans,
         Ais = _ais,
         Port = ParsePort(_port.Text) ?? HostAddress.DefaultPort,
+        PurgeAllies = _allies,
+        PurgeNests = _nests,
         Map = Map,
         RecentHosts = _recentHosts,
     };
@@ -264,7 +272,7 @@ public sealed class MainMenuScreen
 
     private float Scale => _framebuffer.Y >= 1300 ? 2f : _framebuffer.Y >= 960 ? 1.5f : 1f;
 
-    private bool Wide => _page is Page.Skirmish or Page.Host;
+    private bool Wide => _page is Page.Purge or Page.Skirmish or Page.Host;
 
     private (float Left, float Top, float Width, float Height) PanelRect()
     {
@@ -368,11 +376,16 @@ public sealed class MainMenuScreen
         }
 
         // The map column: archetype, seed, sliders, code, limits. Returns the bottom of the column.
-        float MapColumn(float columnTop, int players)
+        float MapColumn(float columnTop, int players, bool handMade = true)
         {
             x0 = inner + columnWidth + (24 * scale);
             y = columnTop;
-            var options = new List<(string, bool, Action)> { ("HAND-MADE", _archetype is null, () => SetMap(null)) };
+            var options = new List<(string, bool, Action)>();
+            if (handMade)
+            {
+                options.Add(("HAND-MADE", _archetype is null, () => SetMap(null)));
+            }
+
             foreach (var archetype in MapArchetypes.All)
             {
                 var target = archetype;
@@ -444,13 +457,13 @@ public sealed class MainMenuScreen
         {
             case Page.Main:
             {
-                _labels.Add((center, y, "BULWARK DIRECTORATE - SKIRMISH AND PEER-TO-PEER MULTIPLAYER", 1.5f * scale, Palette.TextDim, true));
+                _labels.Add((center, y, "BULWARK DIRECTORATE - PURGE THE MAW, SKIRMISH, PEER-TO-PEER", 1.5f * scale, Palette.TextDim, true));
                 y += 34 * scale;
                 var buttonWidth = Math.Min(innerWidth, 300 * scale);
-                foreach (var (label, page) in new[] { ("SKIRMISH", Page.Skirmish), ("HOST GAME", Page.Host), ("JOIN GAME", Page.Join) })
+                foreach (var (label, page) in new[] { ("PURGE", Page.Purge), ("SKIRMISH", Page.Skirmish), ("HOST GAME", Page.Host), ("JOIN GAME", Page.Join) })
                 {
                     var target = page;
-                    _widgets.Add(new Widget(center - (buttonWidth / 2), y, buttonWidth, buttonHeight + (4 * scale), label, () => Go(target), true) { Primary = page == Page.Skirmish });
+                    _widgets.Add(new Widget(center - (buttonWidth / 2), y, buttonWidth, buttonHeight + (4 * scale), label, () => Go(target), true) { Primary = page == Page.Purge });
                     y += buttonHeight + (16 * scale);
                 }
 
@@ -465,6 +478,30 @@ public sealed class MainMenuScreen
                     }
                 }
 
+                break;
+            }
+
+            case Page.Purge:
+            {
+                Heading("PURGE");
+                var columnTop = y;
+                var players = 1 + _allies;
+                Stepper("AI ALLIES", _allies, () => _allies--, _allies > 0, () => _allies++, players < Ashfall.Session.MatchSpec.PurgeMaxPlayers);
+                Stepper("NESTS", _nests, () => _nests--, _nests > 1, () => _nests++, _nests < Ashfall.Session.MatchSpec.PurgeMaxNests);
+                _labels.Add((x0, y + (8 * scale), _seed.Label, 2 * scale, Palette.TextDim, false));
+                _widgets.Add(new Widget(x0 + (130 * scale), y, columnWidth - (250 * scale), rowHeight, string.Empty, null, true) { Field = _seed });
+                _widgets.Add(new Widget(x0 + columnWidth - (110 * scale), y, 110 * scale, rowHeight, "RANDOM", RandomSeed, true));
+                y += rowHeight + (10 * scale);
+                var seedOk = ulong.TryParse(_seed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out _);
+                Note(seedOk
+                    ? "CO-OP AGAINST THE MAW: DESTROY EVERY NEST. NESTS FEED ON THE CINDRITE FIELDS AND BREED; THE FIRST WAVE COMES AT FIVE MINUTES, THEN EVERY TWO, EACH BIGGER. AI ALLIES SHARE YOUR TEAM."
+                    : "ENTER A NUMBER FOR THE SEED.", seedOk ? Palette.TextDim : Palette.TextWarn);
+                PreviewBlock(Ashfall.Session.MatchSpec.PurgeMapStarts(players), bottom);
+                var leftBottom = y;
+                var rightBottom = MapColumn(columnTop, Ashfall.Session.MatchSpec.PurgeMapStarts(players), handMade: false);
+                x0 = inner;
+                y = Math.Max(leftBottom, rightBottom);
+                Actions("START", () => Choose(MenuAction.Purge), seedOk && MapOk());
                 break;
             }
 
@@ -593,6 +630,11 @@ public sealed class MainMenuScreen
         Message = null;
         _dragging = null;
         Focus(null);
+        if (page == Page.Purge && _archetype is null)
+        {
+            SetMap(new MapSettings(MapArchetypes.Crossroads, MapSeedOrRandom())); // a Purge needs a generated map
+        }
+
         if (page == Page.Join)
         {
             Focus(_address);

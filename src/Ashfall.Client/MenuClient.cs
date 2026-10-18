@@ -12,7 +12,7 @@ using Brutal.GlfwApi;
 namespace Ashfall.Client;
 
 /// <summary>
-/// The title-screen loop: show the main menu, run whatever the player picks (skirmish, host, join),
+/// The title-screen loop: show the main menu, run whatever the player picks (Purge, skirmish, host, join),
 /// then come back to the menu, until they quit or close the window.
 /// </summary>
 internal static class MenuClient
@@ -46,6 +46,18 @@ internal static class MenuClient
                     {
                         Seed = settings.Seed,
                         Opponent = settings.IdleOpponent ? PlayerController.IdleAi : PlayerController.ScriptedAi,
+                        GeneratedMap = settings.Map,
+                    }).ConfigureAwait(false);
+                    break;
+
+                case MenuAction.Purge:
+                    await SkirmishClient.Run(window, renderer, input, options with
+                    {
+                        Purge = true,
+                        Swarm = false,
+                        Seed = settings.Seed,
+                        Allies = settings.PurgeAllies,
+                        Nests = settings.PurgeNests,
                         GeneratedMap = settings.Map,
                     }).ConfigureAwait(false);
                     break;

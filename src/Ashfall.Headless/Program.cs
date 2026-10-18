@@ -48,6 +48,9 @@ Console.WriteLine(spec.Mode switch
     MatchMode.Skirmish => string.Create(
         CultureInfo.InvariantCulture,
         $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}"),
+    MatchMode.Purge => string.Create(
+        CultureInfo.InvariantCulture,
+        $"mode=purge seed={spec.Seed} players={spec.Players} controllers={string.Join(',', spec.Controllers)} nests={spec.Nests} creatures={spec.Creatures} map={spec.Map.Width}x{spec.Map.Height} {spec.GeneratedMap!.Archetype.Name} {spec.GeneratedMap.ToCode()} tick-limit={options.Ticks} speed={options.Speed}"),
     MatchMode.Swarm => string.Create(
         CultureInfo.InvariantCulture,
         $"mode=swarm seed={spec.Seed} creatures={spec.Creatures} nests={spec.Nests} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} tick-budget={(options.TickBudgetMs is { } budget ? budget + "ms" : "none")}"),
@@ -72,7 +75,7 @@ for (var run = 1; run <= options.Repeat; run++)
     }
     else
     {
-        result = spec.Mode == MatchMode.Skirmish
+        result = spec.Mode is MatchMode.Skirmish or MatchMode.Purge
             ? await RunSkirmishAsync(match, options, cancellation.Token).ConfigureAwait(false)
             : await match.RunTicksAsync(options.Ticks, cancellation.Token).ConfigureAwait(false);
     }
@@ -82,6 +85,10 @@ for (var run = 1; run <= options.Repeat; run++)
         MatchMode.Swarm => swarm!.Describe(),
         MatchMode.Skirmish when result.IsOver => string.Create(CultureInfo.InvariantCulture, $" winner=team {result.WinningTeam} ({result.FinalTick / 900.0:F1} game minutes)"),
         MatchMode.Skirmish => " winner=none (tick limit reached)",
+        MatchMode.Purge when result.IsOver => string.Create(
+            CultureInfo.InvariantCulture,
+            $" result={MatchReport.Outcome(match.Simulation)} ({result.FinalTick / 900.0:F1} game minutes, {match.Simulation.Maw!.Killed} creatures killed)"),
+        MatchMode.Purge => " result=none (tick limit reached)",
         _ => string.Empty,
     };
     Console.WriteLine(string.Create(
@@ -142,7 +149,7 @@ if (overBudget)
     return 6;
 }
 
-return spec.Mode == MatchMode.Skirmish && first is { IsOver: false } ? 3 : 0;
+return spec.Mode is MatchMode.Skirmish or MatchMode.Purge && first is { IsOver: false } ? 3 : 0;
 
 // Runs to completion, pausing every --report-every ticks to print a status report.
 static async Task<MatchResult> RunSkirmishAsync(HeadlessMatch match, HeadlessOptions options, CancellationToken cancellationToken)

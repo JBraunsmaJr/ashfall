@@ -25,7 +25,17 @@ public sealed class NestSystem : ISystem
         var world = context.World;
         var nests = world.Store<Nest>();
         var maw = context.Simulation.Maw;
-        if (nests.Count == 0 || maw is null)
+        if (maw is null)
+        {
+            return;
+        }
+
+        if (maw.HasWaves && context.Tick >= maw.NextWaveTick)
+        {
+            LaunchWave(world, maw);
+        }
+
+        if (nests.Count == 0)
         {
             return;
         }
@@ -63,9 +73,9 @@ public sealed class NestSystem : ISystem
                 nest.SpawnTimer--;
             }
 
-            if (nest.SpawnTimer > 0)
+            if (nest.SpawnTimer > 0 || context.Tick < maw.Settings.FirstSpawnTick)
             {
-                continue; // spawns are SpawnIntervalTicks apart
+                continue; // spawns are SpawnIntervalTicks apart, and none before the horde's first spawn tick
             }
 
             if (nest.NextCreature < 0)
@@ -75,7 +85,7 @@ public sealed class NestSystem : ISystem
 
             var creatureType = nest.NextCreature;
             var cost = context.Content.Creature(creatureType).BiomassCost;
-            if (nest.Biomass < cost || creatures.Count >= maw.Settings.Population
+            if (nest.Biomass < cost || creatures.Count >= maw.PopulationLimit
                 || !context.Navigator.TryFindNearestPassable(context.Simulation.ExitCell(info), maxRadius: 4, out var exit))
             {
                 continue; // starving, at the population limit, or walled in: try again next tick
@@ -83,7 +93,7 @@ public sealed class NestSystem : ISystem
 
             var jitter = Fix64.FromRatio(2, 5);
             var position = exit.Center + new FixVec2(maw.Random.NextFix64(-jitter, jitter), maw.Random.NextFix64(-jitter, jitter));
-            context.Simulation.SpawnCreature(creatureType, position);
+            context.Simulation.SpawnCreature(creatureType, position, world.EntityAt(index), brooding: maw.HasWaves);
             nest.Biomass -= cost;
             nest.SpawnTimer = rules.SpawnIntervalTicks;
             nest.NextCreature = -1;
@@ -93,6 +103,18 @@ public sealed class NestSystem : ISystem
                 maw.PeakAlive = creatures.Count;
             }
         }
+    }
+
+    // Every brooding creature marches on the players; the next wave is one interval away.
+    private static void LaunchWave(World world, Horde.MawState maw)
+    {
+        foreach (ref var creature in world.Store<Creature>().Components)
+        {
+            creature.Brooding = false;
+        }
+
+        maw.Waves++;
+        maw.NextWaveTick += maw.Settings.WaveIntervalTicks;
     }
 
     // The next creature, drawn from the spawn table by weight. The nest saves up for it, however long that takes,

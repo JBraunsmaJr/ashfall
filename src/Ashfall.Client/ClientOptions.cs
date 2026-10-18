@@ -12,7 +12,7 @@ internal sealed record ClientOptions
 
         Usage: ashfall [options]
 
-        With no options the main menu opens: skirmish, host a game or join one by address.
+        With no options the main menu opens: a co-op Purge, a skirmish, host a game or join one by address.
         Options that only make sense for a skirmish (--seed, --opponent, --frames, --screenshot, ...)
         start one directly; --menu shows the menu anyway.
 
@@ -38,10 +38,15 @@ internal sealed record ClientOptions
           --slider <name=value>  Generated map slider 0-100 (size, richness, elevation, water,
                                  chokepoints, basespacing, vegetation); repeatable
           --record <file>        Save a replay of the match when it ends or you leave
+          --purge                Co-op against the Maw: destroy every nest on a generated map (crossroads
+                                 by default; --archetype, --map-code and --slider pick another)
+          --allies <n>           With --purge: scripted-AI allies on your team (0-3, default 1)
           --swarm                Hold the line: command the Bulwark fortress against the Maw
           --nests <n>            With --swarm: the Maw breeds from n Spawning Pits (1-8, default 4) that feed
                                  and evolve; 0 sends a horde from the map edges instead
+                                 With --purge: Spawning Pits on the map's fields (1-12, default 4)
           --creatures <n>        With --swarm: the most creatures alive at once (default 2000)
+                                 With --purge: a cap on the waves' growth (default 1500)
           -h, --help             Show this help
 
         Multiplayer (peer to peer; the host forwards one UDP port, default 47600):
@@ -68,9 +73,17 @@ internal sealed record ClientOptions
     /// <summary>Play the swarm fortress against the Maw instead of a skirmish.</summary>
     public bool Swarm { get; init; }
 
-    public int Nests { get; init; } = 4;
+    /// <summary>Play a co-op Purge against the Maw instead of a skirmish.</summary>
+    public bool Purge { get; init; }
 
-    public int Creatures { get; init; } = 2_000;
+    /// <summary>Purge: scripted-AI allies on the local player's team.</summary>
+    public int Allies { get; init; } = 1;
+
+    /// <summary>Explicit --nests, if given (swarm default 4, Purge default <see cref="MatchSpec.PurgeDefaultNests"/>).</summary>
+    public int? Nests { get; init; }
+
+    /// <summary>Explicit --creatures, if given (swarm default 2000, Purge default <see cref="MatchSpec.PurgeDefaultCreatures"/>).</summary>
+    public int? Creatures { get; init; }
 
     public bool Autopilot { get; init; }
 
@@ -140,9 +153,17 @@ internal sealed record ClientOptions
 
     public MatchSpec ToSpec()
     {
+        if (Purge)
+        {
+            var map = GeneratedMap ?? MapSettings.Default(MapArchetypes.Crossroads, (uint)(Seed & uint.MaxValue));
+            var purge = MatchSpec.Purge(
+                Seed, 1 + Allies, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, map);
+            return Spectate ? purge : purge.WithController(0, PlayerController.Human);
+        }
+
         if (Swarm)
         {
-            var swarm = MatchSpec.Swarm(Seed, Creatures, Nests);
+            var swarm = MatchSpec.Swarm(Seed, Creatures ?? 2_000, Nests ?? 4);
             return Spectate ? swarm : swarm.WithController(0, PlayerController.Human);
         }
 
@@ -185,7 +206,10 @@ internal sealed record ClientOptions
                     options = options with { Skirmish = true };
                     continue;
                 case "--swarm":
-                    options = options with { Swarm = true, SkirmishImplied = true };
+                    options = options with { Swarm = true, Purge = false, SkirmishImplied = true };
+                    continue;
+                case "--purge":
+                    options = options with { Purge = true, Swarm = false, SkirmishImplied = true };
                     continue;
                 case "--host":
                     options = options with { Host = true };
@@ -201,11 +225,14 @@ internal sealed record ClientOptions
             var value = args[++i];
             switch (name)
             {
-                case "--nests" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var nests) && nests <= MatchSpec.SwarmMaxNests:
-                    options = options with { Nests = nests, Swarm = true, SkirmishImplied = true };
+                case "--nests" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var nests) && nests <= MatchSpec.PurgeMaxNests:
+                    options = options with { Nests = nests, Swarm = !options.Purge, SkirmishImplied = true };
                     break;
                 case "--creatures" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var creatures) && creatures is >= 1 and <= MatchSpec.SwarmMaxCreatures:
-                    options = options with { Creatures = creatures, Swarm = true, SkirmishImplied = true };
+                    options = options with { Creatures = creatures, Swarm = !options.Purge, SkirmishImplied = true };
+                    break;
+                case "--allies" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var allies) && allies < MatchSpec.PurgeMaxPlayers:
+                    options = options with { Allies = allies, Purge = true, Swarm = false, SkirmishImplied = true };
                     break;
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
                     options = options with { Seed = seed, SeedGiven = true, SkirmishImplied = true };
@@ -268,6 +295,12 @@ internal sealed record ClientOptions
                     error = $"Invalid option or value: {name} {value}";
                     return null;
             }
+        }
+
+        if (options.Swarm && options.Nests > MatchSpec.SwarmMaxNests)
+        {
+            error = $"Invalid option or value: --nests {options.Nests} (the swarm fortress has room for {MatchSpec.SwarmMaxNests})";
+            return null;
         }
 
         if (options.MapSeedFromMatch && options.GeneratedMap is { } generated)

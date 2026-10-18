@@ -82,6 +82,14 @@ jobs:
           --hash-out nests-${{ runner.os }}.hash
           --checkpoints-out nests-${{ runner.os }}.checkpoints
 
+      - name: Co-op Purge - two scripted allies against the Maw's nests, played to a result, twice, must match
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode purge --players 2 --seed 1
+          --repeat 2
+          --hash-out purge-${{ runner.os }}.hash
+          --checkpoints-out purge-${{ runner.os }}.checkpoints
+
       - name: Map generation gate (M4) - slider sweeps on every archetype, all valid and fair
         run: >
           dotnet run --project tools/Ashfall.Tools.MapPreview -c Release --no-build --
@@ -104,6 +112,7 @@ jobs:
             generated-${{ runner.os }}.*
             swarm-${{ runner.os }}.*
             nests-${{ runner.os }}.*
+            purge-${{ runner.os }}.*
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet
@@ -186,6 +195,19 @@ jobs:
           fi
           grep -q "simulation at tick 54" battle.log
 
+      - name: Render a Purge (autopilot with an AI ally, through the first wave) with validation
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- \
+              --purge --allies 1 --seed 1 --autopilot --speed unthrottled --until-tick 4700 --zoom 1 \
+              --validation --screenshot render-purge.png 2>&1 | tee purge.log
+          if grep -q "Validation Error" purge.log; then
+            echo "::error::Vulkan validation reported errors (see purge.log above)."
+            exit 1
+          fi
+          grep -q "simulation at tick 47" purge.log
+
       - name: Upload frames
         if: always()
         uses: actions/upload-artifact@v4
@@ -194,7 +216,8 @@ jobs:
           path: render-*.png
 
   cross-platform-determinism:
-    # M0/M1/M4 exit gates: the same matches (hand-made and generated maps) must produce the same hashes on Windows and Linux.
+    # M0/M1/M4/M5 exit gates: the same matches (hand-made and generated maps, the swarm, the Purge) must produce the same
+    # hashes on Windows and Linux.
     name: Cross-platform determinism
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -208,7 +231,7 @@ jobs:
       - name: Compare Linux and Windows hashes
         run: |
           status=0
-          for replay in proving-ground skirmish generated; do
+          for replay in proving-ground skirmish generated swarm nests purge; do
             echo "## ${replay} state hashes" >> "$GITHUB_STEP_SUMMARY"
             echo "Linux:   $(cat ${replay}-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
             echo "Windows: $(cat ${replay}-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"

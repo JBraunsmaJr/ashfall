@@ -6,10 +6,10 @@ using Ashfall.Simulation;
 namespace Ashfall.Session;
 
 /// <summary>
-/// Everything needed to start a match identically on every peer. Two modes for now: the M0 "proving
-/// ground" (open map, wandering units, used to prove determinism) and the skirmish (2–4 Bulwark
-/// players on a hand-made or generated map, any mix of people and AIs, in teams, played to victory).
-/// AI tiers join the spec in a later milestone.
+/// Everything needed to start a match identically on every peer: the M0 "proving ground" (open map,
+/// wandering units, used to prove determinism), the skirmish (2–4 Bulwark players on a hand-made or
+/// generated map, any mix of people and AIs, in teams, played to victory), the swarm stress test, and
+/// the co-op Purge against the Maw. AI tiers join the spec in a later milestone.
 /// </summary>
 public sealed record MatchSpec
 {
@@ -24,6 +24,30 @@ public sealed record MatchSpec
 
     /// <summary>Most nests a swarm match may ask for.</summary>
     public const int SwarmMaxNests = 8;
+
+    /// <summary>Nests a Purge starts with unless told otherwise.</summary>
+    public const int PurgeDefaultNests = 4;
+
+    /// <summary>Most nests a Purge may ask for.</summary>
+    public const int PurgeMaxNests = 12;
+
+    /// <summary>The most Maw creatures alive at once in a Purge unless told otherwise.</summary>
+    public const int PurgeDefaultCreatures = 1_500;
+
+    /// <summary>
+    /// Ticks before a Purge's nests start breeding (3 minutes): time to build a refinery and barracks. The nests feed
+    /// all the while, so the first brood is a big one.
+    /// </summary>
+    public const long PurgeGraceTicks = 2_700;
+
+    /// <summary>
+    /// Ticks between the Maw's waves in a Purge (2 minutes). The first goes one interval after the grace period; in
+    /// between, what the nests breed broods around them.
+    /// </summary>
+    public const int PurgeWaveIntervalTicks = 1_800;
+
+    /// <summary>Most players in a Purge.</summary>
+    public const int PurgeMaxPlayers = 4;
 
     public required ulong Seed { get; init; }
 
@@ -58,12 +82,13 @@ public sealed record MatchSpec
     /// <summary>Skirmish only: the procedural map to play on, or null for the hand-made duel/quad map.</summary>
     public MapSettings? GeneratedMap { get; init; }
 
-    /// <summary>Swarm only: how many creatures the Maw keeps alive (with nests: the most it may have alive).</summary>
+    /// <summary>Swarm: how many creatures the Maw keeps alive (with nests: the most it may have alive). Purge: the most alive.</summary>
     public int Creatures { get; init; }
 
     /// <summary>
-    /// Swarm only: Spawning Pits on Cindrite fields around the fortress. 0 tops the swarm up from the map edges
-    /// instead; with nests, the Maw breeds only from them and fields regrow.
+    /// Swarm: Spawning Pits on Cindrite fields around the fortress. 0 tops the swarm up from the map edges
+    /// instead; with nests, the Maw breeds only from them and fields regrow. Purge: Spawning Pits on the map's
+    /// fields away from the bases (fewer if the map has fewer such fields).
     /// </summary>
     public int Nests { get; init; }
 
@@ -105,6 +130,41 @@ public sealed record MatchSpec
         Creatures = creatures,
         Nests = nests,
     };
+
+    /// <summary>
+    /// A co-op Purge: <paramref name="players"/> Bulwark players (1–4, all scripted AIs until seats are changed with
+    /// <see cref="WithController"/>) on one team, on a generated map, against <paramref name="nests"/> Spawning Pits.
+    /// </summary>
+    /// <param name="map">The generated map; null for the default Crossroads map with the match seed.</param>
+    public static MatchSpec Purge(
+        ulong seed, int players = 1, int nests = PurgeDefaultNests, int creatures = PurgeDefaultCreatures, MapSettings? map = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(players, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(players, PurgeMaxPlayers);
+        var settings = map ?? MapSettings.Default(MapArchetypes.Crossroads, (uint)(seed & uint.MaxValue));
+        var size = MapGenerator.SizeOf(MapGenerator.ApplyLimits(settings, out _));
+        return new MatchSpec
+        {
+            Seed = seed,
+            Mode = MatchMode.Purge,
+            Map = new MapBounds(size, size),
+            Players = players,
+            Controllers = Enumerable.Repeat(PlayerController.ScriptedAi, players).ToArray(),
+            Teams = new int[players],
+            GeneratedMap = settings,
+            Creatures = creatures,
+            Nests = nests,
+        };
+    }
+
+    /// <summary>The Maw's first wave in a Purge: bigger the more players there are (40 for one, 70 for four).</summary>
+    public static int PurgeFirstWaveSize(int players) => 30 + (10 * players);
+
+    /// <summary>How much each wave of a Purge outgrows the last (30 for one player, 60 for four).</summary>
+    public static int PurgeWaveGrowth(int players) => 20 + (10 * players);
+
+    /// <summary>Starts a generated map needs for a Purge of this many players: the generator makes maps for 2 to 4.</summary>
+    public static int PurgeMapStarts(int players) => Math.Max(players, 2);
 
     public MatchSpec WithPlayers(int players) => this with { Players = players };
 
@@ -189,6 +249,40 @@ public sealed record MatchSpec
             {
                 throw new ArgumentOutOfRangeException(nameof(Teams), "A skirmish needs at least two teams.");
             }
+        }
+
+        if (Mode == MatchMode.Purge)
+        {
+            if (Players > PurgeMaxPlayers)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Players), Players, $"A Purge has 1 to {PurgeMaxPlayers} players.");
+            }
+
+            if (GeneratedMap is null)
+            {
+                throw new ArgumentOutOfRangeException(nameof(GeneratedMap), "A Purge is played on a generated map.");
+            }
+
+            var size = MapGenerator.SizeOf(MapGenerator.ApplyLimits(GeneratedMap, out _));
+            if (Map.Width != size || Map.Height != size)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Map), Map, "A Purge's map size is set by its map.");
+            }
+
+            if (Controllers.Count != Players || Teams.Count != Players)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Controllers), Controllers.Count, "A Purge needs one controller and one team per player.");
+            }
+
+            if (Teams.Any(team => team != Teams[0]))
+            {
+                throw new ArgumentOutOfRangeException(nameof(Teams), "A Purge is co-op: every player is on one team.");
+            }
+
+            ArgumentOutOfRangeException.ThrowIfLessThan(Nests, 1, nameof(Nests));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(Nests, PurgeMaxNests, nameof(Nests));
+            ArgumentOutOfRangeException.ThrowIfLessThan(Creatures, 1, nameof(Creatures));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(Creatures, SwarmMaxCreatures, nameof(Creatures));
         }
 
         if (Mode == MatchMode.Swarm)

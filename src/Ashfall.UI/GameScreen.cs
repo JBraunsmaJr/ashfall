@@ -67,6 +67,9 @@ public sealed class GameScreen
     private bool _wasLowPower;
     private Entity _lastSite = Entity.None;
     private int _ownUnitsLastTick = -1;
+    private int _wavesAnnounced;
+    private bool _waveWarned;
+    private int _nestsLastTick = -1;
     private readonly Dictionary<Entity, int> _structureHealth = [];
     private double _leaveArmedUntil = double.MinValue;
 
@@ -121,6 +124,12 @@ public sealed class GameScreen
 
     /// <summary>A line shown across the middle of the view, e.g. "WAITING FOR ANA" (set by the client each frame).</summary>
     public string? Overlay { get; set; }
+
+    /// <summary>The announcements on screen now ("UNIT READY", "THE MAW STIRS", ...), oldest first.</summary>
+    public IEnumerable<string> Announcements => _messages.Select(message => message.Text);
+
+    /// <summary>The Maw line under the clock in a match with waves (nests left, time to the next wave), or null.</summary>
+    public string? MawStatus => MawLine()?.Text;
 
     /// <summary>Set when the player asks to leave: Esc once the match is over, or Esc twice with nothing to cancel.</summary>
     public bool ExitRequested { get; private set; }
@@ -921,6 +930,27 @@ public sealed class GameScreen
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);
         var top = string.Create(CultureInfo.InvariantCulture, $"{(int)clock.TotalMinutes:00}:{clock.Seconds:00}  {_match.Clock.Speed}{(Paused ? "  PAUSED" : string.Empty)}");
         canvas.TextShadowed(8 * scale, 8 * scale, top.ToUpperInvariant(), 2f * scale, Paused ? Palette.Credits : Palette.Text);
+        if (MawLine() is { } maw)
+        {
+            canvas.TextShadowed(8 * scale, 26 * scale, maw.Text, 2f * scale, maw.Color);
+        }
+    }
+
+    // In a match with waves: nests left and the time to the next wave (or the warning that it is coming).
+    private (string Text, LinearColor Color)? MawLine()
+    {
+        if (Simulation.Maw is not { HasWaves: true } maw || Simulation.IsOver)
+        {
+            return null;
+        }
+
+        var nests = Simulation.World.Store<Nest>().Count;
+        var until = TimeSpan.FromSeconds(Math.Max(0, maw.NextWaveTick - Simulation.Tick) / (double)SimulationConstants.TicksPerSecond);
+        var imminent = maw.IsWaveImminent(Simulation.Tick);
+        var text = string.Create(
+            CultureInfo.InvariantCulture,
+            $"NESTS {nests}  {(imminent ? "THE MAW STIRS" : "NEXT WAVE")} {(int)until.TotalMinutes:00}:{until.Seconds:00}");
+        return (text, imminent && ((int)(_now * 3) % 2 == 0) ? Palette.TextWarn : Palette.Credits);
     }
 
     private void DrawMessages(Canvas canvas)
@@ -963,7 +993,9 @@ public sealed class GameScreen
         }
 
         var won = Player >= 0 && Simulation.WinningTeam == Simulation.Players[Player].Team;
-        var title = Player < 0 ? "TEAM " + Simulation.WinningTeam.ToString(CultureInfo.InvariantCulture) + " WINS"
+        var title = Simulation.Goal == MatchGoal.Purge
+            ? Simulation.WinningTeam == GameSimulation.MawTeam ? "THE MAW PREVAILS" : "PURGE COMPLETE"
+            : Player < 0 ? "TEAM " + Simulation.WinningTeam.ToString(CultureInfo.InvariantCulture) + " WINS"
             : won ? "VICTORY" : "DEFEAT";
         var middle = _sidebar.Layout.X / 2f;
         var y = _framebuffer.Y * 0.38f;
@@ -996,6 +1028,7 @@ public sealed class GameScreen
 
     private void Announce()
     {
+        AnnounceMaw();
         if (Player < 0)
         {
             return;
@@ -1050,6 +1083,40 @@ public sealed class GameScreen
             }
 
             _structureHealth[entity] = health;
+        }
+    }
+
+    // The Maw's telegraphs: the warning before a wave, the wave itself, and each nest that falls.
+    private void AnnounceMaw()
+    {
+        if (Simulation.Maw is not { } maw || Simulation.IsOver)
+        {
+            return;
+        }
+
+        var nests = Simulation.World.Store<Nest>().Count;
+        if (_nestsLastTick > nests)
+        {
+            Say(nests == 0 ? "LAST NEST DESTROYED" : "NEST DESTROYED", Palette.TextGood);
+        }
+
+        _nestsLastTick = nests;
+        if (!maw.HasWaves)
+        {
+            return;
+        }
+
+        var imminent = maw.IsWaveImminent(Simulation.Tick);
+        if (imminent && !_waveWarned)
+        {
+            Say("THE MAW STIRS", Palette.TextWarn);
+        }
+
+        _waveWarned = imminent;
+        if (maw.Waves > _wavesAnnounced)
+        {
+            Say(string.Create(CultureInfo.InvariantCulture, $"WAVE {maw.Waves} INCOMING"), Palette.TextWarn);
+            _wavesAnnounced = maw.Waves;
         }
     }
 
