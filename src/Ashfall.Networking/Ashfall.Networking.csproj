@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Peer-to-peer networking: a reliable, ordered message channel over UDP (or a simulated lossy network for tests), the binary wire format and the lockstep protocol messages. No game logic: the session decides what to send and when.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
+  </ItemGroup>
+
+</Project>

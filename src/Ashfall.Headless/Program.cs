@@ -3,6 +3,7 @@ using System.Text;
 using Ashfall.Core;
 using Ashfall.Headless;
 using Ashfall.Session;
+using Ashfall.Session.Replays;
 
 var options = HeadlessOptions.Parse(args, out var error);
 if (options is null)
@@ -25,11 +26,27 @@ Console.CancelKeyPress += (_, e) =>
     cancellation.Cancel();
 };
 
+if (options.ReplayIn is { } replayPath)
+{
+    var replay = Replay.Load(replayPath);
+    Console.WriteLine(replay.ToString());
+    var (hash, matches) = replay.Verify();
+    Console.WriteLine(matches
+        ? $"Replay reproduced the recorded final state {StateHasher.Format(hash)}."
+        : $"DESYNC: replay ended at {StateHasher.Format(hash)}, recording ended at {StateHasher.Format(replay.FinalHash)}.");
+    return matches ? 0 : 1;
+}
+
+if (options.IsNetwork)
+{
+    return NetworkRunner.Run(options, cancellation.Token);
+}
+
 var spec = options.ToMatchSpec();
 Console.WriteLine(spec.Mode == MatchMode.Skirmish
     ? string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=skirmish seed={spec.Seed} map={spec.Map.Width}x{spec.Map.Height} tick-limit={options.Ticks} speed={options.Speed}")
+        $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} tick-limit={options.Ticks} speed={options.Speed}")
     : string.Create(
         CultureInfo.InvariantCulture,
         $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"));
@@ -53,6 +70,10 @@ for (var run = 1; run <= options.Repeat; run++)
     if (first is null)
     {
         first = result;
+        if (options.RecordOut is not null)
+        {
+            Replay.From(match).Save(options.RecordOut);
+        }
     }
     else if (result.FinalStateHash != first.FinalStateHash || !result.Checkpoints.SequenceEqual(first.Checkpoints))
     {

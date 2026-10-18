@@ -64,10 +64,18 @@ public sealed class GameScreen
     private readonly Dictionary<Entity, int> _structureHealth = [];
 
     public GameScreen(HeadlessMatch match)
+        : this(match, match?.LocalPlayer, networked: false)
+    {
+    }
+
+    /// <param name="orders">Where this player's commands go (null to spectate).</param>
+    /// <param name="networked">A network match: no pausing or speed changes, which would affect every peer.</param>
+    public GameScreen(HeadlessMatch match, LocalOrders? orders, bool networked)
     {
         ArgumentNullException.ThrowIfNull(match);
         _match = match;
-        _orders = match.LocalPlayer;
+        _orders = orders;
+        Networked = networked;
         Player = _orders?.PlayerId ?? -1;
         _painter = new WorldPainter(_batch, _fog, _motion);
         Camera = new IsoCamera(match.Simulation.Map.Width, match.Simulation.Map.Height);
@@ -98,6 +106,12 @@ public sealed class GameScreen
     public IReadOnlyList<Entity> Selection => _selection;
 
     public bool Paused { get; private set; }
+
+    /// <summary>A network match: pause and game speed are not the local player's to change.</summary>
+    public bool Networked { get; }
+
+    /// <summary>A line shown across the middle of the view, e.g. "WAITING FOR ANA" (set by the client each frame).</summary>
+    public string? Overlay { get; set; }
 
     /// <summary>Set when the player asks to leave (Esc after the match ends).</summary>
     public bool ExitRequested { get; private set; }
@@ -201,6 +215,7 @@ public sealed class GameScreen
         _sidebar.Draw(canvas, Simulation, Player, _lastMouse, StatusLine());
         Minimap.Draw(canvas, Simulation, Player, _fog, Camera, _sidebar.Layout.Minimap);
         DrawMessages(canvas);
+        DrawOverlay(canvas);
         DrawGameOver(canvas);
     }
 
@@ -241,12 +256,12 @@ public sealed class GameScreen
             }
         }
 
-        if (input.WasPressed(Key.P))
+        if (input.WasPressed(Key.P) && !Networked)
         {
             Paused = !Paused;
         }
 
-        if (input.WasPressed(Key.Plus) || input.WasPressed(Key.Minus))
+        if ((input.WasPressed(Key.Plus) || input.WasPressed(Key.Minus)) && !Networked)
         {
             _speedIndex = Math.Clamp(_speedIndex + (input.WasPressed(Key.Plus) ? 1 : -1), 0, Speeds.Length - 1);
             _match.SetSpeed(Speeds[_speedIndex]);
@@ -736,7 +751,9 @@ public sealed class GameScreen
 
         // Help and status, bottom-left of the view.
         var scale = _sidebar.Layout.Scale;
-        var help = "RMB MOVE/ATTACK  A ATTACK-MOVE  S STOP  CTRL+0-9 GROUP  H HOME  +/- SPEED  P PAUSE";
+        var help = Networked
+            ? "RMB MOVE/ATTACK  A ATTACK-MOVE  S STOP  CTRL+0-9 GROUP  H HOME"
+            : "RMB MOVE/ATTACK  A ATTACK-MOVE  S STOP  CTRL+0-9 GROUP  H HOME  +/- SPEED  P PAUSE";
         canvas.TextShadowed(8 * scale, _framebuffer.Y - (14 * scale), help, scale, Palette.TextDim);
         var tick = Simulation.Tick;
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);
@@ -761,6 +778,19 @@ public sealed class GameScreen
             canvas.TextCentered(_sidebar.Layout.X / 2f, y, text, scale, Palette.WithAlpha(color, fade));
             y += 12f * scale;
         }
+    }
+
+    private void DrawOverlay(Canvas canvas)
+    {
+        if (string.IsNullOrEmpty(Overlay) || Simulation.IsOver)
+        {
+            return;
+        }
+
+        var scale = 3f * _sidebar.Layout.Scale;
+        var y = _framebuffer.Y * 0.3f;
+        canvas.Rect(0, y - (10 * _sidebar.Layout.Scale), _sidebar.Layout.X, (PixelFont.GlyphHeight * scale) + (20 * _sidebar.Layout.Scale), new LinearColor(0, 0, 0, 0.55f));
+        canvas.TextCentered(_sidebar.Layout.X / 2f, y, Overlay.ToUpperInvariant(), scale, Palette.Credits);
     }
 
     private void DrawGameOver(Canvas canvas)

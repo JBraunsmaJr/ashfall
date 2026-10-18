@@ -26,7 +26,17 @@ internal sealed record ClientOptions
           --no-validation        Disable it
           --no-vsync             Present as fast as possible (mailbox or immediate)
           --size <WxH>           Window size in pixels (default 1280x720)
+          --record <file>        Save a replay of the match when it ends or you leave
           -h, --help             Show this help
+
+        Multiplayer (peer to peer; the host forwards one UDP port, default 47600):
+          --host                 Host a lobby; --humans and --ais set the slots
+          --humans <n>           Network players including you (default 2)
+          --ais <n>              AI players (default 0); 2-4 players in total
+          --join <ip:port>       Join the lobby at ip:port
+          --rejoin <ip:port>     Rejoin a match in progress (after a crash) through any player in it
+          --port <n>             UDP port to listen on (default 47600 when hosting, any otherwise)
+          --name <text>          Your display name (default PLAYER)
 
         In game: left-click selects (drag for a box), right-click moves or attacks, A then click
         attack-moves, S stops, Ctrl+0-9 stores a control group and 0-9 recalls it (twice to jump),
@@ -66,6 +76,24 @@ internal sealed record ClientOptions
 
     public bool ShowHelp { get; init; }
 
+    public string? Record { get; init; }
+
+    public bool Host { get; init; }
+
+    public int Humans { get; init; } = 2;
+
+    public int Ais { get; init; }
+
+    public string? Join { get; init; }
+
+    public string? Rejoin { get; init; }
+
+    public int? Port { get; init; }
+
+    public string Name { get; init; } = "PLAYER";
+
+    public bool IsNetwork => Host || Join is not null || Rejoin is not null;
+
     public MatchSpec ToSpec()
     {
         var spec = MatchSpec.Skirmish(Seed);
@@ -100,6 +128,9 @@ internal sealed record ClientOptions
                 case "--autopilot":
                     options = options with { Autopilot = true };
                     continue;
+                case "--host":
+                    options = options with { Host = true };
+                    continue;
             }
 
             if (i + 1 >= args.Count)
@@ -131,6 +162,27 @@ internal sealed record ClientOptions
                     break;
                 case "--look-at" when TryParsePoint(value, out var point):
                     options = options with { LookAt = point };
+                    break;
+                case "--record" when value.Length > 0:
+                    options = options with { Record = value };
+                    break;
+                case "--humans" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var humans) && humans is >= 1 and <= 4:
+                    options = options with { Humans = humans };
+                    break;
+                case "--ais" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var ais) && ais is >= 0 and <= 3:
+                    options = options with { Ais = ais };
+                    break;
+                case "--join" when value.Contains(':', StringComparison.Ordinal):
+                    options = options with { Join = value };
+                    break;
+                case "--rejoin" when value.Contains(':', StringComparison.Ordinal):
+                    options = options with { Rejoin = value };
+                    break;
+                case "--port" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port <= 65535:
+                    options = options with { Port = port };
+                    break;
+                case "--name" when value.Length > 0:
+                    options = options with { Name = value };
                     break;
                 case "--zoom" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var zoom) && zoom <= 2:
                     options = options with { Zoom = zoom };

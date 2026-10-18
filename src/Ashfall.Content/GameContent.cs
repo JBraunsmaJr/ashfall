@@ -66,6 +66,88 @@ public sealed class GameContent
     public int FactionIndex(string id) =>
         _factionIndices.TryGetValue(id, out var index) ? index : throw new KeyNotFoundException($"Unknown faction '{id}'.");
 
+    /// <summary>
+    /// A fingerprint of every definition and rule. Peers compare it in the lobby: two players with
+    /// different content (a mod, a balance patch) would desync, so they cannot start a match together.
+    /// </summary>
+    public ulong ComputeHash()
+    {
+        var hasher = new StateHasher();
+        foreach (var unit in Units)
+        {
+            hasher.Add(unit.Id);
+            hasher.Add(unit.Cost);
+            hasher.Add(unit.BuildTicks);
+            hasher.Add(unit.Health);
+            hasher.Add((int)unit.Armor);
+            hasher.Add(unit.SpeedPerTick);
+            hasher.Add(unit.AcquisitionRange);
+            hasher.Add((int)unit.ProducedBy);
+            hasher.Add(unit.HarvestCapacity);
+            hasher.Add(unit.Sight);
+            hasher.Add(unit.Weapon is not null);
+            if (unit.Weapon is { } weapon)
+            {
+                hasher.Add(weapon.Id);
+                hasher.Add((int)weapon.Warhead);
+                hasher.Add(weapon.Damage);
+                hasher.Add(weapon.Range);
+                hasher.Add(weapon.CooldownTicks);
+            }
+        }
+
+        foreach (var structure in Structures)
+        {
+            hasher.Add(structure.Id);
+            hasher.Add((int)structure.Role);
+            hasher.Add(structure.Cost);
+            hasher.Add(structure.BuildTicks);
+            hasher.Add(structure.Health);
+            hasher.Add(structure.Width);
+            hasher.Add(structure.Height);
+            hasher.Add(structure.Power);
+            hasher.Add(structure.Sight);
+            hasher.Add(structure.FreeUnitId);
+            hasher.Add(structure.Prerequisites.Count);
+            foreach (var role in structure.Prerequisites)
+            {
+                hasher.Add((int)role);
+            }
+        }
+
+        foreach (var faction in Factions)
+        {
+            hasher.Add(faction.Id);
+            hasher.Add(faction.StartingStructureId);
+            foreach (var id in faction.StructureIds)
+            {
+                hasher.Add(id);
+            }
+
+            foreach (var id in faction.UnitIds)
+            {
+                hasher.Add(id);
+            }
+        }
+
+        hasher.Add(Economy.StartingCredits);
+        hasher.Add(Economy.HarvestAmount);
+        hasher.Add(Economy.HarvestIntervalTicks);
+        hasher.Add(Economy.UnloadPerTick);
+        hasher.Add(Economy.LowPowerSlowdown);
+        hasher.Add(Economy.BuildRadius);
+        hasher.Add(Economy.QueueCapacity);
+        for (var warhead = 0; warhead < Enum.GetValues<Warhead>().Length; warhead++)
+        {
+            for (var armor = 0; armor < Enum.GetValues<ArmorType>().Length; armor++)
+            {
+                hasher.Add(DamageTable.Percent((Warhead)warhead, (ArmorType)armor));
+            }
+        }
+
+        return hasher.Value;
+    }
+
     public UnitDefinition Unit(int index) => Units[index];
 
     public StructureDefinition Structure(int index) => Structures[index];

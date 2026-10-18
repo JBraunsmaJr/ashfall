@@ -22,3 +22,5 @@ Thumbs.db
 *.hash.out
 desync-dumps/
 replays/local/
+lan-match/
+*.ashreplay

@@ -57,6 +57,12 @@ jobs:
           --hash-out skirmish-${{ runner.os }}.hash
           --checkpoints-out skirmish-${{ runner.os }}.checkpoints
 
+      - name: LAN match (M3 gate) - four separate processes over UDP, no desyncs, replay verified
+        shell: bash
+        run: |
+          LAN_MATCH_OUT=lan-match eng/lan-match.sh 4 47600 Release
+          cp lan-match/peer0.hash lan-${{ runner.os }}.hash
+
       - name: Upload determinism hashes
         uses: actions/upload-artifact@v4
         with:
@@ -64,6 +70,14 @@ jobs:
           path: |
             proving-ground-${{ runner.os }}.*
             skirmish-${{ runner.os }}.*
+            lan-${{ runner.os }}.hash
+
+      - name: Upload LAN match logs and replay
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lan-match-${{ runner.os }}
+          path: lan-match/
 
       - name: Upload test results
         if: failure()
@@ -155,4 +169,11 @@ jobs:
               status=1
             fi
           done
+          echo "## LAN match (4 processes) final state" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux:   $(cat lan-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows: $(cat lan-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"
+          if ! diff lan-Linux.hash lan-Windows.hash > /dev/null; then
+            echo "::error::The LAN match ended differently on Linux and Windows."
+            status=1
+          fi
           exit $status

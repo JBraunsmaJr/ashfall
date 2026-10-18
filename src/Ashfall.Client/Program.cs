@@ -63,6 +63,11 @@ try
     window.OnFramebufferSize += (_, _) => renderer.NotifyResized();
     Console.WriteLine($"GPU: {renderer.Gpu}");
 
+    if (options.IsNetwork)
+    {
+        return MultiplayerClient.Run(window, renderer, new GlfwInput(window, new InputState()), options);
+    }
+
     await using var match = await HeadlessMatch.StartAsync(options.ToSpec(), options.Speed).ConfigureAwait(false);
     if (options.Autopilot && match.LocalPlayer is { } local)
     {
@@ -158,6 +163,12 @@ try
         renderer.RequestCapture();
         screen.Draw(scene, TickAlpha(match), clock.Elapsed.TotalSeconds);
         renderer.RenderFrame(scene);
+    }
+
+    if (options.Record is not null)
+    {
+        Ashfall.Session.Replays.Replay.From(match).Save(options.Record);
+        Console.WriteLine($"Saved replay to {options.Record}.");
     }
 
     if (options.Screenshot is not null && renderer.LastCapture is { } capture)

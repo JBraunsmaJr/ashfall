@@ -1,13 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Match host shared by the client and the headless runner: wires the simulation to command sources and a game-speed clock. No window, no GPU.</Description>
+    <Description>Match host shared by the client and the headless runner: wires the simulation to command sources and a game-speed clock, runs lockstep network matches, records and plays replays. No window, no GPU.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
     <ProjectReference Include="..\Ashfall.Content\Ashfall.Content.csproj" />
     <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
+    <ProjectReference Include="..\Ashfall.Networking\Ashfall.Networking.csproj" />
   </ItemGroup>
 
 </Project>

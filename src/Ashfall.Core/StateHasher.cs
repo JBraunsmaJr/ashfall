@@ -50,6 +50,22 @@ public struct StateHasher
         Add(value.Y);
     }
 
+    /// <summary>Adds a string as its length then its UTF-16 code units (culture- and platform-independent).</summary>
+    public void Add(string? value)
+    {
+        if (value is null)
+        {
+            Add(-1);
+            return;
+        }
+
+        Add(value.Length);
+        foreach (var c in value)
+        {
+            Add((ulong)c);
+        }
+    }
+
     /// <summary>Formats a hash the way logs, replays and CI artifacts print it.</summary>
     public static string Format(ulong hash) => $"0x{hash:X16}";
 }

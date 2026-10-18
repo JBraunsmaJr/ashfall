@@ -21,6 +21,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
     private readonly List<ICommandSource> _sources = [];
     private readonly List<Command> _tickCommands = [];
     private readonly List<HashCheckpoint> _checkpoints = [];
+    private readonly List<Command> _recorded = [];
     private readonly TimeProvider _timeProvider;
 
     private HeadlessMatch(MatchSpec spec, GameSpeed speed, TimeProvider timeProvider)
@@ -32,6 +33,13 @@ public sealed class HeadlessMatch : IAsyncDisposable
         {
             Simulation = CreateSkirmish(spec, _sources, out var localPlayer);
             LocalPlayer = localPlayer;
+            var remote = Enumerable.Range(0, spec.Players).Where(seat => spec.Controllers[seat] == PlayerController.Remote).ToArray();
+            if (remote.Length > 0)
+            {
+                Turns = new TurnFeed(remote, spec.Players, spec.InputDelay);
+                _sources.Insert(0, Turns);
+            }
+
             return;
         }
 
@@ -55,6 +63,12 @@ public sealed class HeadlessMatch : IAsyncDisposable
 
     /// <summary>The human player's command queue, or null when every side is an AI.</summary>
     public LocalOrders? LocalPlayer { get; }
+
+    /// <summary>Turns for <see cref="PlayerController.Remote"/> seats (network players, replays), or null if there are none.</summary>
+    public TurnFeed? Turns { get; }
+
+    /// <summary>Every command from people (the local player and remote seats), for replays and desync dumps.</summary>
+    public CommandLog Log { get; } = new();
 
     public long Tick => Simulation.Tick;
 
@@ -89,15 +103,25 @@ public sealed class HeadlessMatch : IAsyncDisposable
     /// <summary>Changes game speed; takes effect from the next tick.</summary>
     public void SetSpeed(GameSpeed speed) => Clock.Restart(speed, Tick);
 
+    /// <summary>True when the next tick has every turn it needs (always, without remote seats).</summary>
+    public bool CanStep => Turns is null || Turns.IsComplete(Simulation.Tick);
+
     /// <summary>Runs exactly one tick immediately, ignoring the clock.</summary>
     public void Step()
     {
         _tickCommands.Clear();
+        _recorded.Clear();
         foreach (var source in _sources)
         {
+            var before = _tickCommands.Count;
             source.CollectCommands(Simulation, Simulation.Tick, _tickCommands);
+            if (source is LocalOrders or TurnFeed)
+            {
+                _recorded.AddRange(CollectionsMarshal.AsSpan(_tickCommands)[before..]);
+            }
         }
 
+        Log.Record(Simulation.Tick, CollectionsMarshal.AsSpan(_recorded));
         Simulation.Step(CollectionsMarshal.AsSpan(_tickCommands));
 
         if (Simulation.Tick % SimulationConstants.HashCheckInterval == 0)
@@ -167,12 +191,17 @@ public sealed class HeadlessMatch : IAsyncDisposable
     {
         localPlayer = null;
         var content = GameContent.Standard;
-        PlayerSetup[] players = [new(Team: 0, BulwarkContent.FactionId), new(Team: 1, BulwarkContent.FactionId)];
-        var simulation = new GameSimulation(spec.Seed, DuelMap.Create(), content, players);
+        var players = new PlayerSetup[spec.Players];
+        for (var player = 0; player < players.Length; player++)
+        {
+            players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId);
+        }
+
+        var simulation = new GameSimulation(spec.Seed, SkirmishMaps.Create(spec.Players), content, players);
         var yard = content.StructureIndex(BulwarkContent.ConstructionYard);
         for (var player = 0; player < players.Length; player++)
         {
-            simulation.PlaceStructure(player, yard, DuelMap.StartOrigin(player));
+            simulation.PlaceStructure(player, yard, SkirmishMaps.StartOrigin(spec.Players, player));
             switch (spec.Controllers[player])
             {
                 case PlayerController.ScriptedAi:
@@ -182,6 +211,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
                     localPlayer = new LocalOrders(player);
                     sources.Add(localPlayer);
                     break;
+                case PlayerController.Remote:
                 case PlayerController.IdleAi:
                 default:
                     break;
