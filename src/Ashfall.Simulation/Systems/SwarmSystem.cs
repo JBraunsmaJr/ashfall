@@ -63,7 +63,7 @@ public sealed class SwarmSystem : ISystem
 
         for (var i = 0; i < indices.Length; i++)
         {
-            _occupancy[map.IndexOf(Cell.Containing(positions.Get(indices[i]).Value))]++;
+            _occupancy[map.IndexOf(Cell.Containing(positions.Get(indices[i]).Value))] += context.Content.Creature(states[i].CreatureType).CellWeight;
         }
 
         for (var i = 0; i < indices.Length; i++)
@@ -124,10 +124,14 @@ public sealed class SwarmSystem : ISystem
             return false;
         }
 
-        return TryStepToward(simulation.Map, ref position, aim, definition.SpeedPerTick);
+        return TryStepToward(simulation.Map, ref position, aim, definition);
     }
 
-    /// <summary>Steps to the cheapest open neighbour on the flow field, or starts attacking a player structure it touches.</summary>
+    /// <summary>
+    /// Steps to the cheapest open neighbour on the flow field, or starts attacking a player structure it touches.
+    /// Ranged creatures (weapon reach beyond a cell) stop as soon as a player building other than a wall is in reach:
+    /// they walk up to the wall and arc acid over it. A wall they bump into they attack like anyone else.
+    /// </summary>
     private void FollowField(GameSimulation simulation, FlowField field, CreatureDefinition definition, int index, ref Creature creature, ref Position position)
     {
         var map = simulation.Map;
@@ -136,6 +140,14 @@ public sealed class SwarmSystem : ISystem
         if (here == FlowField.Unreachable)
         {
             return; // nothing to attack from here: wait for the layout to change
+        }
+
+        var reach = definition.Weapon.Range;
+        if (reach > Fix64.One && here <= (reach.CeilingToInt() + 2) * FlowField.StraightCost
+            && FindStructureInReach(simulation, position.Value, reach) is { IsNone: false } building)
+        {
+            creature.Target = building;
+            return;
         }
 
         var best = new Cell(-1, -1);
@@ -162,7 +174,7 @@ public sealed class SwarmSystem : ISystem
             }
 
             var cost = field.CostAt(next);
-            if (cost < bestCost && map.IsPassable(next) && _occupancy[map.IndexOf(next)] < CellCapacity)
+            if (cost < bestCost && map.IsPassable(next) && _occupancy[map.IndexOf(next)] + definition.CellWeight <= CellCapacity)
             {
                 best = next;
                 bestCost = cost;
@@ -174,34 +186,64 @@ public sealed class SwarmSystem : ISystem
             return; // every way on is full or uphill: wait
         }
 
-        TryStepToward(map, ref position, best.Center + Jitter(index), definition.SpeedPerTick);
+        TryStepToward(map, ref position, best.Center + Jitter(index), definition);
     }
 
     // Moves straight toward the point if the step stays on passable ground and does not crowd a full cell (the
     // step may clip a cell beside the one aimed at, so the cell actually entered is the one checked).
-    private bool TryStepToward(GridMap map, ref Position position, FixVec2 point, Fix64 speed)
+    private bool TryStepToward(GridMap map, ref Position position, FixVec2 point, CreatureDefinition definition)
     {
         var from = Cell.Containing(position.Value);
-        var next = Advance(position.Value, point, speed);
+        var next = Advance(position.Value, point, definition.SpeedPerTick);
         var to = Cell.Containing(next);
-        if (!map.IsPassable(to) || (to != from && _occupancy[map.IndexOf(to)] >= CellCapacity))
+        if (!map.IsPassable(to) || (to != from && _occupancy[map.IndexOf(to)] + definition.CellWeight > CellCapacity))
         {
             return false;
         }
 
-        Move(map, ref position, from, to, next);
-        return true;
-    }
-
-    private void Move(GridMap map, ref Position position, Cell from, Cell to, FixVec2 next)
-    {
         position.Value = map.Bounds.Clamp(next);
         to = Cell.Containing(position.Value);
         if (to != from)
         {
-            _occupancy[map.IndexOf(from)]--;
-            _occupancy[map.IndexOf(to)]++;
+            _occupancy[map.IndexOf(from)] -= definition.CellWeight;
+            _occupancy[map.IndexOf(to)] += definition.CellWeight;
         }
+
+        return true;
+    }
+
+    // The player building (not a wall) within reach to spit at: the nearest (closest point of its footprint), then
+    // the lowest entity index.
+    private static Entity FindStructureInReach(GameSimulation simulation, FixVec2 position, Fix64 reach)
+    {
+        var map = simulation.Map;
+        var content = simulation.Content;
+        var structures = simulation.World.Store<StructureInfo>();
+        var best = Entity.None;
+        var bestDistance = reach * reach;
+        var (minX, minY, maxX, maxY) = simulation.Spatial.CellsAround(position, reach);
+        for (var y = minY; y <= maxY; y++)
+        {
+            for (var x = minX; x <= maxX; x++)
+            {
+                var index = map.StructureAt(new Cell(x, y));
+                var entity = simulation.World.EntityAt(index);
+                if (index < 0 || entity == best || !IsValidTarget(simulation, entity)
+                    || content.Structure(structures.Get(index).StructureType).Role == StructureRole.Wall)
+                {
+                    continue;
+                }
+
+                var distance = FixVec2.DistanceSquared(position, simulation.ClosestPointOf(entity, position));
+                if (distance < bestDistance || (distance == bestDistance && (best.IsNone || index < best.Index)))
+                {
+                    best = entity;
+                    bestDistance = distance;
+                }
+            }
+        }
+
+        return best;
     }
 
     private static FixVec2 Advance(FixVec2 from, FixVec2 to, Fix64 speed)

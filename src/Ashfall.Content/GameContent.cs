@@ -196,12 +196,21 @@ public sealed class GameContent
         foreach (var creature in Creatures)
         {
             hasher.Add(creature.Weapon.SplashRadius);
+            hasher.Add(creature.CellWeight);
         }
 
         foreach (var nest in Nests)
         {
             hasher.Add(nest.StructureId);
-            hasher.Add(nest.CreatureId);
+            hasher.Add(nest.Spawns.Count);
+            foreach (var spawn in nest.Spawns)
+            {
+                hasher.Add(spawn.CreatureId);
+                hasher.Add(spawn.Weight);
+            }
+
+            hasher.Add(nest.EvolvesTo);
+            hasher.Add(nest.EvolveAfter);
             hasher.Add(nest.FeedRadius);
             hasher.Add(nest.FeedIntervalTicks);
             hasher.Add(nest.FeedAmount);
@@ -282,6 +291,7 @@ public sealed class GameContent
         foreach (var creature in Creatures)
         {
             if (creature.Health <= 0 || creature.SpeedPerTick <= Fix64.Zero || creature.BiomassCost <= 0
+                || creature.CellWeight <= 0 || creature.CellWeight > 8
                 || creature.Weapon.Damage <= 0 || creature.Weapon.CooldownTicks <= 0 || creature.Weapon.Range <= Fix64.Zero)
             {
                 throw new InvalidOperationException($"Creature '{creature.Id}' has a non-positive health, speed, cost or weapon value.");
@@ -300,7 +310,29 @@ public sealed class GameContent
                 throw new InvalidOperationException($"Nest structure '{nest.StructureId}' does not have the Nest role.");
             }
 
-            CreatureIndex(nest.CreatureId);
+            if (nest.Spawns.Count == 0)
+            {
+                throw new InvalidOperationException($"Nest '{nest.StructureId}' spawns nothing.");
+            }
+
+            foreach (var spawn in nest.Spawns)
+            {
+                CreatureIndex(spawn.CreatureId);
+                if (spawn.Weight <= 0)
+                {
+                    throw new InvalidOperationException($"Nest '{nest.StructureId}' has a non-positive spawn weight for '{spawn.CreatureId}'.");
+                }
+            }
+
+            if (nest.EvolvesTo is { } next)
+            {
+                var from = Structure(StructureIndex(nest.StructureId));
+                var to = Structure(StructureIndex(next));
+                if (NestFor(StructureIndex(next)) is null || to.Width != from.Width || to.Height != from.Height || nest.EvolveAfter <= 0)
+                {
+                    throw new InvalidOperationException($"Nest '{nest.StructureId}' must evolve into a nest of the same size after eating something.");
+                }
+            }
             if (nest.FeedRadius < 0 || nest.FeedIntervalTicks <= 0 || nest.FeedAmount < 0 || nest.MaxBiomass <= 0
                 || nest.StartingBiomass < 0 || nest.StartingBiomass > nest.MaxBiomass || nest.SpawnIntervalTicks <= 0)
             {

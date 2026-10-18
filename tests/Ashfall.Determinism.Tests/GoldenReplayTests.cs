@@ -12,7 +12,8 @@ namespace Ashfall.Determinism.Tests;
 /// <item><b>skirmish</b> (M1): the default 1v1 Bulwark duel between scripted AIs, played to victory.</item>
 /// <item><b>generated</b> (M4): a 2v2 between scripted AIs on a generated Riverlands map, played to victory.</item>
 /// <item><b>swarm</b> (M5): 1,000 Maw creatures against the Bulwark fortress for one minute.</item>
-/// <item><b>nests</b> (M5): four Spawning Pits on regrowing Cindrite breeding against the fortress for four minutes.</item>
+/// <item><b>nests</b> (M5): four Spawning Pits on regrowing Cindrite breeding against the fortress for four minutes,
+/// evolving into Brood Nests that add Spitters.</item>
 /// </list>
 /// <c>maps.hashes</c> pins the generator itself: map code, player count and the grid's hash.
 /// </summary>

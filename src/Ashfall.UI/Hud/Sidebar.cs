@@ -65,7 +65,7 @@ public sealed class Sidebar
                 {
                     entry.Reason = "NEEDS " + missing;
                 }
-                else if (site is { } building)
+                else if (site is { } building && definition.Role != StructureRole.Wall)
                 {
                     entry.Reason = "BUILDING";
                     if (building.StructureType == entry.TypeIndex)

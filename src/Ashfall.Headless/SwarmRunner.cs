@@ -110,13 +110,26 @@ internal static class SwarmRunner
             var (structures, units) = SwarmFortress.Survivors(simulation, player: 0);
             var nests = simulation.World.Store<Nest>();
             var biomass = 0;
-            foreach (var nest in nests.Components)
+            var tiers = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            foreach (var index in nests.EntityIndices)
             {
-                biomass += nest.Biomass;
+                biomass += nests.Get(index).Biomass;
+                var name = simulation.Content.Structure(simulation.World.Store<StructureInfo>().Get(index).StructureType).Name;
+                tiers[name] = tiers.GetValueOrDefault(name) + 1;
+            }
+
+            var kinds = new SortedDictionary<string, int>(StringComparer.Ordinal);
+            foreach (var creature in simulation.World.Store<Creature>().Components)
+            {
+                var name = simulation.Content.Creature(creature.CreatureType).Name;
+                kinds[name] = kinds.GetValueOrDefault(name) + 1;
             }
 
             var breeding = match.Spec.Nests == 0 ? string.Empty
-                : string.Create(CultureInfo.InvariantCulture, $" nests={nests.Count}/{match.Spec.Nests} biomass={biomass} cindrite={simulation.Map.TotalCindrite}");
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $" nests={nests.Count}/{match.Spec.Nests} [{string.Join(", ", tiers.Select(tier => $"{tier.Value} {tier.Key}"))}] biomass={biomass} cindrite={simulation.Map.TotalCindrite}" +
+                    $" alive=[{string.Join(", ", kinds.Select(kind => $"{kind.Value} {kind.Key}"))}]");
             return string.Create(
                 CultureInfo.InvariantCulture,
                 $" creatures={simulation.World.Store<Creature>().Count} peak={maw.PeakAlive} spawned={maw.Spawned} killed={maw.Killed}{breeding}" +

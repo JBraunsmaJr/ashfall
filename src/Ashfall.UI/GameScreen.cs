@@ -28,6 +28,9 @@ public sealed class GameScreen
     // Pixels the mouse must travel with the button down before a click becomes a drag box.
     private const float DragThreshold = 6f;
 
+    /// <summary>Longest wall line one drag lays, in segments.</summary>
+    public const int MaxWallLine = 40;
+
     // Pixels from the window edge that scroll the camera.
     private const float EdgeScrollMargin = 4f;
     private const float PanSpeed = 900f;
@@ -50,6 +53,9 @@ public sealed class GameScreen
 
     private Vector2 _framebuffer = new(1280, 720);
     private Vector2? _dragStart;
+
+    // Where a wall drag started, while the left button is held in wall placement.
+    private Cell? _lineStart;
     private Vector2 _lastMouse;
     private int _placing = -1;
     private bool _attackMove;
@@ -171,7 +177,7 @@ public sealed class GameScreen
         HandleCamera(input);
 
         var overSidebar = _sidebar.Layout.Contains(input.Mouse);
-        if (overSidebar && _dragStart is null)
+        if (overSidebar && _dragStart is null && _lineStart is null)
         {
             HandleSidebar(input);
         }
@@ -205,7 +211,19 @@ public sealed class GameScreen
         _painter.PaintTerrain(Simulation, Camera, time);
         _painter.PaintStructures(Simulation, Player, _selectedSet, scene);
         _painter.PaintUnits(Simulation, Player, _selectedSet, Math.Clamp(alpha, 0f, 1f));
-        if (_placing >= 0 && !_sidebar.Layout.Contains(_lastMouse))
+        if (_placing >= 0 && _lineStart is { } lineStart)
+        {
+            var cost = Simulation.Content.Structure(_placing).Cost;
+            var affordable = cost > 0 ? Simulation.Players[Player].Credits / cost : int.MaxValue;
+            var valid = 0;
+            foreach (var cell in WallLine(lineStart, PlacementOrigin(_lastMouse)))
+            {
+                var ok = Simulation.CheckPlacement(Player, _placing, cell) == PlacementResult.Ok && valid < affordable;
+                valid += ok ? 1 : 0;
+                _painter.PaintPlacement(Simulation, _placing, cell, ok);
+            }
+        }
+        else if (_placing >= 0 && !_sidebar.Layout.Contains(_lastMouse))
         {
             var origin = PlacementOrigin(_lastMouse);
             _painter.PaintPlacement(Simulation, _placing, origin, Simulation.CheckPlacement(Player, _placing, origin) == PlacementResult.Ok);
@@ -252,6 +270,7 @@ public sealed class GameScreen
             else if (_placing >= 0 || _attackMove)
             {
                 _placing = -1;
+                _lineStart = null;
                 _attackMove = false;
             }
             else if (_selection.Count > 0)
@@ -452,6 +471,12 @@ public sealed class GameScreen
 
     private void HandleWorld(InputState input)
     {
+        if (_placing >= 0 && Simulation.Content.Structure(_placing).Role == StructureRole.Wall)
+        {
+            HandleWallPlacement(input);
+            return;
+        }
+
         if (_placing >= 0)
         {
             if (input.WasPressed(MouseButton.Left) && _orders is not null)
@@ -693,6 +718,86 @@ public sealed class GameScreen
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// The cells a wall drag from <paramref name="start"/> to <paramref name="end"/> covers: a straight line along
+    /// whichever grid axis the drag went further on, starting at <paramref name="start"/>, at most
+    /// <see cref="MaxWallLine"/> long. A drag that ends where it started is a single segment.
+    /// </summary>
+    public static IReadOnlyList<Cell> WallLine(Cell start, Cell end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var alongX = Math.Abs(dx) >= Math.Abs(dy);
+        var length = Math.Min(alongX ? Math.Abs(dx) : Math.Abs(dy), MaxWallLine - 1);
+        var (stepX, stepY) = alongX ? (Math.Sign(dx), 0) : (0, Math.Sign(dy));
+        var cells = new Cell[length + 1];
+        for (var i = 0; i <= length; i++)
+        {
+            cells[i] = new Cell(start.X + (i * stepX), start.Y + (i * stepY));
+        }
+
+        return cells;
+    }
+
+    // Walls are laid by dragging: press anchors the line, release lays it. The tool stays in hand afterwards so
+    // the next line can follow; right-click or Escape puts it away.
+    private void HandleWallPlacement(InputState input)
+    {
+        if (input.WasPressed(MouseButton.Right))
+        {
+            _placing = -1;
+            _lineStart = null;
+            return;
+        }
+
+        if (_orders is null)
+        {
+            return;
+        }
+
+        if (input.WasPressed(MouseButton.Left))
+        {
+            _lineStart = PlacementOrigin(input.Mouse);
+        }
+
+        if (input.WasReleased(MouseButton.Left) && _lineStart is { } start)
+        {
+            _lineStart = null;
+            LayWalls(WallLine(start, PlacementOrigin(input.Mouse)));
+        }
+    }
+
+    // Orders a wall on every cell of the line that can take one, as far as the money goes; reports what was skipped.
+    private void LayWalls(IReadOnlyList<Cell> cells)
+    {
+        var cost = Simulation.Content.Structure(_placing).Cost;
+        var credits = Simulation.Players[Player].Credits;
+        var laid = 0;
+        PlacementResult? problem = null;
+        foreach (var cell in cells)
+        {
+            var result = Simulation.CheckPlacement(Player, _placing, cell);
+            if (result == PlacementResult.Ok && (laid + 1) * cost > credits)
+            {
+                result = PlacementResult.CannotAfford;
+            }
+
+            if (result != PlacementResult.Ok)
+            {
+                problem ??= result;
+                continue;
+            }
+
+            _orders!.Enqueue(Command.Build(Player, _placing, cell));
+            laid++;
+        }
+
+        if (problem is { } reason)
+        {
+            Say(laid == 0 ? Describe(reason) : string.Create(CultureInfo.InvariantCulture, $"{laid} OF {cells.Count} WALLS: {Describe(reason)}"), Palette.TextWarn);
+        }
     }
 
     private Cell PlacementOrigin(Vector2 mouse)

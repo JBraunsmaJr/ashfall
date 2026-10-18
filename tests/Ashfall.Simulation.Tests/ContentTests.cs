@@ -116,7 +116,8 @@ public class ContentTests
 
         Assert.Equal(StructureRole.Nest, pit.Role);
         Assert.Equal(ArmorType.Carapace, pit.Armor);
-        Assert.Equal(MawContent.Skitter, nest.CreatureId);
+        Assert.Equal([new SpawnWeight(MawContent.Skitter, 1)], nest.Spawns);
+        Assert.Equal(MawContent.BroodNest, nest.EvolvesTo);
         Assert.Null(content.NestFor(content.StructureIndex(BulwarkContent.Barracks)));
         Assert.Equal(ArmorType.Structure, content.Structure(content.StructureIndex(BulwarkContent.Barracks)).Armor);
         Assert.DoesNotContain(content.Faction(0).StructureIds, id => id == MawContent.SpawningPit);
@@ -128,12 +129,37 @@ public class ContentTests
         var standard = GameContent.Standard;
         var nest = standard.Nests[0];
         GameContent With(NestDefinition changed) =>
-            new(standard.Units, standard.Structures, standard.Factions, standard.Economy, standard.Creatures, [changed]);
+            new(standard.Units, standard.Structures, standard.Factions, standard.Economy, standard.Creatures, [changed, .. standard.Nests.Skip(1)]);
 
         Assert.Throws<InvalidOperationException>(() => With(nest with { StructureId = BulwarkContent.Barracks }));
-        Assert.Throws<KeyNotFoundException>(() => With(nest with { CreatureId = "maw.ghost" }));
+        Assert.Throws<KeyNotFoundException>(() => With(nest with { Spawns = [new SpawnWeight("maw.ghost", 1)] }));
+        Assert.Throws<InvalidOperationException>(() => With(nest with { Spawns = [] }));
+        Assert.Throws<InvalidOperationException>(() => With(nest with { Spawns = [new SpawnWeight(MawContent.Skitter, 0)] }));
         Assert.Throws<InvalidOperationException>(() => With(nest with { StartingBiomass = nest.MaxBiomass + 1 }));
         Assert.NotEqual(standard.ComputeHash(), With(nest with { FeedAmount = nest.FeedAmount + 1 }).ComputeHash());
+    }
+
+    [Fact]
+    public void Nests_evolve_pit_to_brood_nest_to_behemoth_den_in_place()
+    {
+        var content = GameContent.Standard;
+        string[] chain = [MawContent.SpawningPit, MawContent.BroodNest, MawContent.BehemothDen];
+        for (var tier = 0; tier < chain.Length; tier++)
+        {
+            var type = content.StructureIndex(chain[tier]);
+            var nest = content.NestFor(type)!;
+            Assert.Equal(tier + 1, nest.Spawns.Count);
+            Assert.Equal(tier < chain.Length - 1 ? chain[tier + 1] : null, nest.EvolvesTo);
+            if (tier > 0)
+            {
+                Assert.True(content.Structure(type).Health > content.Structure(content.StructureIndex(chain[tier - 1])).Health);
+            }
+        }
+
+        var siegebeast = content.Creature(content.CreatureIndex(MawContent.Siegebeast));
+        Assert.Equal((ArmorType.Carapace, 8), (siegebeast.Armor, siegebeast.CellWeight));
+        var spitter = content.Creature(content.CreatureIndex(MawContent.Spitter));
+        Assert.True(spitter.Weapon.Range > content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).Weapon!.Range);
     }
 
     [Fact]

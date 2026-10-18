@@ -294,7 +294,8 @@ public sealed class GameSimulation
             return PlacementResult.NoConstructionYard;
         }
 
-        if (World.IsAlive(player.ConstructionSite))
+        // One structure at a time, as in the classic sidebar; walls are the exception, so a whole line can go up at once.
+        if (World.IsAlive(player.ConstructionSite) && definition.Role != StructureRole.Wall)
         {
             return PlacementResult.AlreadyBuilding;
         }
@@ -550,7 +551,11 @@ public sealed class GameSimulation
 
         var player = _players[command.PlayerId];
         player.Spend(Content.Structure(command.TypeIndex).Cost);
-        player.ConstructionSite = PlaceStructure(command.PlayerId, command.TypeIndex, command.Cell, complete: false);
+        var site = PlaceStructure(command.PlayerId, command.TypeIndex, command.Cell, complete: false);
+        if (Content.Structure(command.TypeIndex).Role != StructureRole.Wall)
+        {
+            player.ConstructionSite = site; // walls build alongside everything else and never take the slot
+        }
         return true;
     }
 

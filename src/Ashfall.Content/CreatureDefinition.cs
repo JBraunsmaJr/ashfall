@@ -10,6 +10,9 @@ namespace Ashfall.Content;
 /// <param name="Weapon">The creature's attack. Range is measured to the edge of the target, as for units.</param>
 /// <param name="AggroRange">How far the creature notices player units and turns to attack them, in cells.</param>
 /// <param name="BiomassCost">What one creature costs the Maw's spawning budget.</param>
+/// <param name="CellWeight">
+/// How much of a cell's room the creature takes (a cell holds 8): 1 for chaff, 8 for a behemoth that fills a cell alone.
+/// </param>
 public sealed record CreatureDefinition(
     string Id,
     string Name,
@@ -18,4 +21,5 @@ public sealed record CreatureDefinition(
     Fix64 SpeedPerTick,
     WeaponDefinition Weapon,
     Fix64 AggroRange,
-    int BiomassCost);
+    int BiomassCost,
+    int CellWeight = 1);

@@ -76,6 +76,28 @@ public class DefenceTests
     }
 
     [Fact]
+    public void Walls_build_alongside_other_construction_and_never_take_its_slot()
+    {
+        var sim = WithYard();
+        sim.PlaceStructure(0, Barracks, new Cell(6, 2));
+        var plant = Structure(BulwarkContent.PowerPlant);
+
+        sim.Step([
+            Commands.Command.Build(0, plant, new Cell(9, 2)),
+            Commands.Command.Build(0, Wall, new Cell(2, 7)),
+            Commands.Command.Build(0, Wall, new Cell(3, 7)),
+            Commands.Command.Build(0, Wall, new Cell(4, 7)),
+        ]);
+
+        var site = sim.Players[0].ConstructionSite;
+        Assert.Equal(plant, sim.World.Get<StructureInfo>(site).StructureType);
+        Assert.Equal(PlacementResult.AlreadyBuilding, sim.CheckPlacement(0, plant, new Cell(9, 6)));
+        Assert.Equal(PlacementResult.Ok, sim.CheckPlacement(0, Wall, new Cell(5, 7)));
+        Assert.Equal(5_000 - 300 - (3 * 50), sim.Players[0].Credits);
+        Assert.Equal(0, sim.RejectedCommands);
+    }
+
+    [Fact]
     public void A_player_left_with_only_walls_is_defeated()
     {
         var sim = Create(victory: true);
