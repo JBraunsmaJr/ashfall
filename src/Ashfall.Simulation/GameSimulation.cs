@@ -39,7 +39,10 @@ public sealed class GameSimulation
 
     /// <param name="victoryEnabled">When true, a player with no structures is defeated and the match ends when one team remains.</param>
     /// <param name="horde">How the Maw spawns, or null for a match without a horde.</param>
-    /// <param name="cindriteRegrowth">When true, harvested Cindrite fields grow back (see <see cref="CindriteRegrowthSystem"/>).</param>
+    /// <param name="cindriteRegrowth">
+    /// When true, harvested Cindrite fields grow back from their fissures (see <see cref="CindriteRegrowthSystem"/>).
+    /// Every real match has it; it is off by default so rule tests can count Cindrite exactly.
+    /// </param>
     public GameSimulation(
         ulong seed,
         GridMap map,

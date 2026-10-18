@@ -6,8 +6,9 @@ namespace Ashfall.Simulation.Systems;
 /// Cindrite fields grow back (GDD section 2): every <see cref="Content.EconomyRules.CindriteRegrowIntervalTicks"/>
 /// ticks, each field cell below the density it was laid down with regains
 /// <see cref="Content.EconomyRules.CindriteRegrowAmount"/>, as long as it or a straight neighbour still holds some
-/// Cindrite. A cell harvested to nothing comes back only when the field around it is alive, so a field picked
-/// completely clean (or purged) stays dead. Only in matches created with regrowth on.
+/// Cindrite. Fields rise from fissures (<see cref="GridMap.IsFissure"/>): a fissure regrows even when empty, so a
+/// field harvested completely clean comes back, from its fissure outward, a ring every interval. Only a field
+/// with no fissure stays dead once picked clean. Only in matches created with regrowth on.
 /// </summary>
 /// <remarks>
 /// Which cells regrow is decided from the field as it stands before any cell grows, then all of them grow, so the
@@ -47,7 +48,7 @@ public sealed class CindriteRegrowthSystem : ISystem
 
     private static bool IsAlive(GridMap map, Cell cell)
     {
-        if (map.CindriteAt(cell) > 0)
+        if (map.CindriteAt(cell) > 0 || map.IsFissure(cell))
         {
             return true;
         }

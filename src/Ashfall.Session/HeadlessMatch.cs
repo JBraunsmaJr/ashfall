@@ -220,7 +220,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
         }
 
         var map = matchMap = MatchMap.Create(spec.GeneratedMap, spec.Players);
-        var simulation = new GameSimulation(spec.Seed, map.Grid, content, players);
+        var simulation = new GameSimulation(spec.Seed, map.Grid, content, players, cindriteRegrowth: true);
         var yard = content.StructureIndex(BulwarkContent.ConstructionYard);
         for (var player = 0; player < players.Length; player++)
         {
@@ -260,7 +260,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
         };
         var simulation = new GameSimulation(
             spec.Seed, SwarmFortress.Create(), content, [new PlayerSetup(spec.Teams[0], BulwarkContent.FactionId)], victoryEnabled: false, horde,
-            cindriteRegrowth: spec.Nests > 0);
+            cindriteRegrowth: true);
         SwarmFortress.Build(simulation, player: 0);
         SwarmFortress.PlaceNests(simulation, spec.Nests);
         return simulation;

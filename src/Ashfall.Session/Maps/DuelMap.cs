@@ -51,6 +51,13 @@ public static class DuelMap
             }
         }
 
+        // Each field rises from a fissure at its heart: the base fields' centres and the two middle cells of the centre.
+        Cell[] fissures = [new Cell(16, 5), Mirror(new Cell(16, 5)), new Cell(31, 31), Mirror(new Cell(31, 31))];
+        foreach (var fissure in fissures)
+        {
+            map.SetFissure(fissure, map.CindriteAt(fissure));
+        }
+
         return map;
     }
 

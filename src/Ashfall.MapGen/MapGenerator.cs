@@ -159,6 +159,7 @@ public static class MapGenerator
         private readonly bool[] _lane;
         private readonly bool[] _pad;
         private readonly int[] _cindrite;
+        private readonly bool[] _fissure;
 
         public Builder(MapSettings settings, int players, int attempt, bool plain)
         {
@@ -177,6 +178,7 @@ public static class MapGenerator
             _lane = new bool[cells];
             _pad = new bool[cells];
             _cindrite = new int[cells];
+            _fissure = new bool[cells];
         }
 
         private int Order => _symmetry.Order;
@@ -527,6 +529,7 @@ public static class MapGenerator
                 var index = Index(cell);
                 _terrain[index] = Terrain.Clear;
                 _cindrite[index] = 0;
+                _fissure[index] = false;
             });
         }
 
@@ -546,6 +549,9 @@ public static class MapGenerator
                     _cindrite[index] = density + ((radius - distance) * 50);
                 }
             });
+
+            // The fissure it rises from, at its heart: the field grows back from here even when picked clean.
+            Everywhere(centre, cell => _fissure[Index(cell)] = true);
         }
 
         // ---- painting helpers -------------------------------------------------------------------------
@@ -650,6 +656,10 @@ public static class MapGenerator
                     if (_cindrite[index] > 0)
                     {
                         map.SetCindrite(cell, _cindrite[index]);
+                        if (_fissure[index])
+                        {
+                            map.SetFissure(cell, _cindrite[index]);
+                        }
                     }
                 }
             }

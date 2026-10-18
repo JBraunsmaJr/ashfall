@@ -79,6 +79,14 @@ public sealed class ScriptedSkirmishAi : ICommandSource
             return;
         }
 
+        // Without a Construction Yard nothing can be built, so nothing is worth saving for: what is left goes
+        // into the army instead of sitting in reserve for a refinery that will never come.
+        var yard = simulation.Content.StructureIndex(BulwarkContent.ConstructionYard);
+        if (CountStructures(simulation, yard) == 0)
+        {
+            return;
+        }
+
         var content = simulation.Content;
         var next = NextStructure(simulation, player);
         if (next < 0)
@@ -237,11 +245,12 @@ public sealed class ScriptedSkirmishAi : ICommandSource
             }
         }
 
-        // All in: with no harvester and too little money to train anything, the army will never grow,
-        // so waiting for a full wave would stall the match forever. Send whatever is left.
+        // All in: with no harvester and no way to train anything (too little money, or no barracks left), the
+        // army will never grow, so waiting for a full wave would stall the match forever. Send whatever is left.
         var content = simulation.Content;
         var broke = CountUnits(simulation, content.UnitIndex(BulwarkContent.Harvester)) == 0
-            && simulation.Players[_playerId].Credits < content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).Cost;
+            && (FindProducer(simulation, StructureRole.Barracks).IsNone
+                || simulation.Players[_playerId].Credits < content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).Cost);
         if (_idleAtHome.Count < (broke ? 1 : _waveSize))
         {
             return;

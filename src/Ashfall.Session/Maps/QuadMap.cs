@@ -53,6 +53,16 @@ public static class QuadMap
             }
         }
 
+        // Each field rises from a fissure at its heart: every base field's centre and the four middle cells.
+        Cell base0 = new(17, 5), middle = new((Size / 2) - 1, (Size / 2) - 1);
+        for (var i = 0; i < 4; i++)
+        {
+            map.SetFissure(base0, map.CindriteAt(base0));
+            map.SetFissure(middle, map.CindriteAt(middle));
+            base0 = Rotate(base0);
+            middle = Rotate(middle);
+        }
+
         return map;
     }
 

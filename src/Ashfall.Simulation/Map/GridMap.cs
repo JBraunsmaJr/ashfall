@@ -16,6 +16,10 @@ public sealed class GridMap
     // The density each field cell was laid down with: what it regrows toward. Fixed once the map is built,
     // so it is part of the map's description rather than changing state, and not hashed.
     private readonly int[] _cindriteCap;
+
+    // Fissures: vents in the ground at the heart of each field that Cindrite seeps up from. Part of the map's
+    // description like the caps (fixed once built, not hashed).
+    private readonly bool[] _fissure;
     private readonly int[] _structure;
     private readonly byte[] _height;
 
@@ -32,6 +36,7 @@ public sealed class GridMap
         _terrain = new Terrain[width * height];
         _cindrite = new int[width * height];
         _cindriteCap = new int[width * height];
+        _fissure = new bool[width * height];
         _structure = new int[width * height];
         _height = new byte[width * height];
         Array.Fill(_structure, NoStructure);
@@ -82,6 +87,24 @@ public sealed class GridMap
         _cindrite[index] = amount;
         _cindriteCap[index] = amount;
     }
+
+    /// <summary>
+    /// Opens a fissure: a vent Cindrite seeps up from, so its field grows back even when harvested completely clean.
+    /// The cell becomes field (at <paramref name="density"/> if it was not already), can never be built on, and can
+    /// still be walked over and harvested. Map building only.
+    /// </summary>
+    public void SetFissure(Cell cell, int density)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(density);
+        var index = IndexOf(cell);
+        _fissure[index] = true;
+        if (_cindriteCap[index] == 0)
+        {
+            SetCindrite(cell, density);
+        }
+    }
+
+    public bool IsFissure(Cell cell) => InBounds(cell) && _fissure[IndexOf(cell)];
 
     /// <summary>The density a field cell regrows toward (0 for ground that never held Cindrite).</summary>
     public int CindriteCapAt(Cell cell) => InBounds(cell) ? _cindriteCap[IndexOf(cell)] : 0;
@@ -135,7 +158,8 @@ public sealed class GridMap
 
     /// <summary>A structure footprint may cover this cell: clear ground, no structure and no Cindrite.</summary>
     public bool IsBuildable(Cell cell) =>
-        InBounds(cell) && _terrain[IndexOf(cell)] == Terrain.Clear && _structure[IndexOf(cell)] == NoStructure && _cindrite[IndexOf(cell)] == 0;
+        InBounds(cell) && _terrain[IndexOf(cell)] == Terrain.Clear && _structure[IndexOf(cell)] == NoStructure && _cindrite[IndexOf(cell)] == 0
+        && !_fissure[IndexOf(cell)];
 
     public bool IsPassable(int index) => IsWalkable(_terrain[index]) && _structure[index] == NoStructure;
 

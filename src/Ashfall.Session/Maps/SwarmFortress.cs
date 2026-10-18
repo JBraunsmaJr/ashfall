@@ -142,6 +142,9 @@ public static class SwarmFortress
                     }
                 }
             }
+
+            // The fissure the field rises from, just off the nest's corner.
+            simulation.Map.SetFissure(new Cell(center.X + 2, center.Y + 2), NestFieldDensity);
         }
     }
 

@@ -21,6 +21,8 @@ public static class Palette
     public static readonly LinearColor CindriteGround = LinearColor.FromSrgb(96, 64, 44);
     public static readonly LinearColor Cindrite = LinearColor.FromSrgb(255, 128, 36);
     public static readonly LinearColor CindriteHot = LinearColor.FromSrgb(255, 196, 92);
+    public static readonly LinearColor Fissure = LinearColor.FromSrgb(52, 40, 34);
+    public static readonly LinearColor FissureDepth = LinearColor.FromSrgb(18, 12, 10);
     public static readonly LinearColor Concrete = LinearColor.FromSrgb(156, 154, 146);
     public static readonly LinearColor ConcreteDark = LinearColor.FromSrgb(112, 110, 104);
     public static readonly LinearColor Metal = LinearColor.FromSrgb(84, 88, 94);

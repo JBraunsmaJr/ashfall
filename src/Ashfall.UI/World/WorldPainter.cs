@@ -125,6 +125,17 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                         continue;
                 }
 
+                if (map.IsFissure(cell))
+                {
+                    // The vent itself stays open so it reads; its Cindrite shows as the crystals around it.
+                    if (fog.At(x, y) > 0f)
+                    {
+                        PaintFissure(x, y, top, time);
+                    }
+
+                    continue;
+                }
+
                 var cindrite = map.CindriteAt(cell);
                 if (cindrite > 0 && fog.At(x, y) > 0f)
                 {
@@ -465,6 +476,50 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 break;
         }
     }
+
+    private void PaintFissure(int x, int y, float ground, double time)
+    {
+        // A scorched patch split by a jagged crack whose ember core breathes: the vent the field regrows from.
+        var seed = Hash(x, y);
+        var center = new Vector2(x + 0.5f, y + 0.5f);
+        batch.Begin(x + y + 0.4f, ground);
+        batch.Disc(center, 0.48f, GroundEpsilon, Palette.Fissure);
+        var glow = 0.5f + (0.5f * MathF.Sin((float)(time * 1.7) + (seed % 628 / 100f)));
+        var core = Palette.Mix(Palette.Cindrite, Palette.CindriteHot, glow * 0.6f);
+        var angle = (seed & 0xFF) / 255f * MathF.Tau;
+        for (var arm = 0; arm < 3; arm++)
+        {
+            // Each arm bends once on its way out from the middle.
+            var heading = angle + (arm * MathF.Tau / 3f) + ((((seed >> (8 + (arm * 4))) & 0xF) - 7) * 0.06f);
+            var bend = heading + ((((seed >> (20 + (arm * 3))) & 0x7) - 3) * 0.18f);
+            var middle = center + (Direction(heading) * 0.18f);
+            var end = middle + (Direction(bend) * (0.12f + (((seed >> (arm * 5)) & 0x3) * 0.03f)));
+            Crack(center, middle, 0.07f, GroundEpsilon * 2, Palette.FissureDepth, 0f);
+            Crack(middle, end, 0.05f, GroundEpsilon * 2, Palette.FissureDepth, 0f);
+            Crack(center, middle, 0.03f, GroundEpsilon * 3, core, 0.7f + (0.3f * glow));
+            Crack(middle, end, 0.02f, GroundEpsilon * 3, core, 0.5f + (0.3f * glow));
+        }
+
+        batch.Disc(center, 0.09f, GroundEpsilon * 3, core, emissive: 0.8f + (0.2f * glow));
+        batch.End();
+    }
+
+    // A thin strip on the ground from a to b.
+    private void Crack(Vector2 a, Vector2 b, float halfWidth, float z, LinearColor color, float emissive)
+    {
+        var along = b - a;
+        if (along.LengthSquared() < 1e-6f)
+        {
+            return;
+        }
+
+        var side = Vector2.Normalize(new Vector2(-along.Y, along.X)) * halfWidth;
+        batch.Quad(
+            new Vector3(a - side, z), new Vector3(b - side, z), new Vector3(b + side, z), new Vector3(a + side, z),
+            Vector3.UnitZ, color, emissive);
+    }
+
+    private static Vector2 Direction(float angle) => new(MathF.Cos(angle), MathF.Sin(angle));
 
     private void PaintCrystals(int x, int y, int amount, float ground)
     {

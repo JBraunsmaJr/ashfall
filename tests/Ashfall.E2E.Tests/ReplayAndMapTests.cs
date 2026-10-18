@@ -72,6 +72,52 @@ public class ReplayAndMapTests
         Assert.Equal(spec.Map, read.Map);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    public void Every_field_on_the_hand_made_maps_rises_from_a_fissure(int players)
+    {
+        var map = SkirmishMaps.Create(players);
+        var fissures = 0;
+        for (var y = 0; y < map.Height; y++)
+        {
+            for (var x = 0; x < map.Width; x++)
+            {
+                var cell = new Cell(x, y);
+                if (map.IsFissure(cell))
+                {
+                    fissures++;
+                    Assert.True(map.CindriteCapAt(cell) > 0, $"The fissure at {cell} is not in a field.");
+                }
+            }
+        }
+
+        Assert.Equal(players == 2 ? 4 : 8, fissures); // one per base field, plus the centre field's heart
+    }
+
+    [Fact]
+    public void Generated_fields_rise_from_fissures_symmetrically()
+    {
+        Assert.True(Ashfall.MapGen.MapSettings.TryParseCode("RIV-20000Z-N5NJHJ-TM6XWS", out var settings));
+        var generated = Ashfall.MapGen.MapGenerator.Generate(settings, 4);
+        var map = generated.Map;
+        var fissures = new List<Cell>();
+        for (var y = 0; y < map.Height; y++)
+        {
+            for (var x = 0; x < map.Width; x++)
+            {
+                if (map.IsFissure(new Cell(x, y)))
+                {
+                    fissures.Add(new Cell(x, y));
+                }
+            }
+        }
+
+        Assert.NotEmpty(fissures);
+        Assert.Equal(0, fissures.Count % generated.SymmetryOrder);
+        Assert.All(fissures, cell => Assert.True(map.CindriteCapAt(cell) > 0));
+    }
+
     [Fact]
     public void Swarm_settings_round_trip_through_the_replay_codec()
     {

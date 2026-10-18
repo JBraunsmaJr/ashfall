@@ -137,6 +137,7 @@ public sealed class GameScreen
     /// <summary>Call after every simulation tick: tracks motion, turns events into effects and messages.</summary>
     public void OnTick()
     {
+        PruneSelection(); // anything selected may have died this tick
         _motion.Capture(Simulation);
         foreach (var shot in _motion.Shots)
         {
@@ -194,6 +195,10 @@ public sealed class GameScreen
     {
         ArgumentNullException.ThrowIfNull(scene);
         _now = time;
+
+        // Ticks can run between input and drawing (the client and replays step the simulation without OnTick), so a
+        // selected unit or building may be dead by now: drop it before anything reads the selection.
+        PruneSelection();
         _sidebar.Update(Simulation, Player, _framebuffer, _placing);
         scene.Clear();
         scene.ClearColor = Palette.Clear;

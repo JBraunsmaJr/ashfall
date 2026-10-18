@@ -78,6 +78,49 @@ public class CindriteTests
         Assert.Equal(0, sim.Map.TotalCindrite);
     }
 
+    [Fact]
+    public void A_field_picked_clean_grows_back_from_its_fissure_ring_by_ring()
+    {
+        var sim = WithRegrowth();
+        var map = sim.Map;
+        for (var x = 4; x <= 8; x++)
+        {
+            map.SetCindrite(new Cell(x, 5), 400);
+        }
+
+        map.SetFissure(new Cell(6, 5), 400);
+        for (var x = 4; x <= 8; x++)
+        {
+            map.TakeCindrite(new Cell(x, 5), 400); // harvested to the last grain
+        }
+
+        Run(sim, Rules.CindriteRegrowIntervalTicks + 1);
+        Assert.Equal(Rules.CindriteRegrowAmount, map.CindriteAt(new Cell(6, 5))); // the fissure seeps first
+        Assert.Equal(0, map.CindriteAt(new Cell(5, 5)));
+
+        Run(sim, Rules.CindriteRegrowIntervalTicks);
+        Assert.Equal(Rules.CindriteRegrowAmount, map.CindriteAt(new Cell(5, 5))); // then the ring around it
+        Assert.Equal(Rules.CindriteRegrowAmount, map.CindriteAt(new Cell(7, 5)));
+        Assert.Equal(0, map.CindriteAt(new Cell(4, 5)));
+
+        Run(sim, Rules.CindriteRegrowIntervalTicks * 200);
+        Assert.Equal(5 * 400, map.TotalCindrite); // all the way back, and no further
+    }
+
+    [Fact]
+    public void Fissures_cannot_be_built_on_even_when_empty()
+    {
+        var map = new GridMap(16, 16);
+        map.SetFissure(new Cell(5, 5), 300);
+        map.TakeCindrite(new Cell(5, 5), 300);
+
+        Assert.True(map.IsFissure(new Cell(5, 5)));
+        Assert.Equal(300, map.CindriteCapAt(new Cell(5, 5)));
+        Assert.False(map.IsBuildable(new Cell(5, 5)));
+        Assert.True(map.IsPassable(new Cell(5, 5)));
+        Assert.True(map.IsBuildable(new Cell(6, 5)));
+    }
+
     private static GameSimulation WithRegrowth() =>
         new(7, new GridMap(32, 32), TestMatch.Content,
             [new PlayerSetup(0, BulwarkContent.FactionId), new PlayerSetup(1, BulwarkContent.FactionId)],
