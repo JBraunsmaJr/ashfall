@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Vulkan 1.3 renderer on BRUTAL: device selection, swapchain, frames in flight and dynamic rendering. Knows nothing about windows or the simulation; it renders what it is given.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Ahwoo.Brutal.Vulkan.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ashfall.Rendering.Tests" />
+  </ItemGroup>
+
+</Project>

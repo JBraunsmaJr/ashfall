@@ -62,6 +62,39 @@ jobs:
           name: test-results-${{ runner.os }}
           path: TestResults
 
+  render-smoke:
+    # Runs the real client: window, Vulkan device, swapchain and 300 cleared frames, on Mesa's software
+    # Vulkan driver (lavapipe) under a virtual X display, with the Khronos validation layer turned on.
+    # libvulkan-dev is deliberately not installed, as on players' machines (see NativeLibraryFallbacks).
+    name: Render smoke test (Linux, software Vulkan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install software Vulkan, validation layer and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-validationlayers xvfb
+
+      - name: Build client
+        run: dotnet build src/Ashfall.Client -c Release
+
+      - name: Render 300 frames with validation
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- --frames 300 --validation 2>&1 | tee render.log
+          if grep -q "Validation Error" render.log; then
+            echo "::error::Vulkan validation reported errors (see render.log above)."
+            exit 1
+          fi
+          grep -q "Presented 300 frames" render.log
+
   cross-platform-determinism:
     # M0 exit gate: the same replay must produce the same hash on Windows and Linux.
     name: Cross-platform determinism

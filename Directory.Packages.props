@@ -10,6 +10,7 @@
     <!-- Floating until the first restore; replace with the exact version `dotnet package search Ahwoo.Brutal.Glfw` reports. -->
     <PackageVersion Include="Ahwoo.Brutal.Core" Version="*-*" />
     <PackageVersion Include="Ahwoo.Brutal.Glfw" Version="*-*" />
+    <PackageVersion Include="Ahwoo.Brutal.Vulkan.Abstractions" Version="*-*" />
   </ItemGroup>
 
   <ItemGroup Label="Analyzers">

@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The game client: composition root for the session, renderer, audio and UI. M0: a BRUTAL/GLFW window driving a real-time proving-ground match.</Description>
+    <Description>The game client: composition root for the session, renderer, audio and UI. M0: a BRUTAL/GLFW window, cleared by the Vulkan renderer, driving a real-time proving-ground match.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <OutputType>Exe</OutputType>
     <AssemblyName>ashfall</AssemblyName>
     <RootNamespace>Ashfall.Client</RootNamespace>
@@ -14,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ashfall.Session\Ashfall.Session.csproj" />
+    <ProjectReference Include="..\Ashfall.Rendering\Ashfall.Rendering.csproj" />
   </ItemGroup>
 
 </Project>

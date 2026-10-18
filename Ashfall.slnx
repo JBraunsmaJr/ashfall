@@ -4,6 +4,7 @@
     <Project Path="src/Ashfall.Simulation/Ashfall.Simulation.csproj" />
     <Project Path="src/Ashfall.Session/Ashfall.Session.csproj" />
     <Project Path="src/Ashfall.Headless/Ashfall.Headless.csproj" />
+    <Project Path="src/Ashfall.Rendering/Ashfall.Rendering.csproj" />
     <Project Path="src/Ashfall.Client/Ashfall.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -12,6 +13,7 @@
     <Project Path="tests/Ashfall.E2E.Tests/Ashfall.E2E.Tests.csproj" />
     <Project Path="tests/Ashfall.Determinism.Tests/Ashfall.Determinism.Tests.csproj" />
     <Project Path="tests/Ashfall.Architecture.Tests/Ashfall.Architecture.Tests.csproj" />
+    <Project Path="tests/Ashfall.Rendering.Tests/Ashfall.Rendering.Tests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
