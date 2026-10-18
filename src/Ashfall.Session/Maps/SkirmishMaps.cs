@@ -2,7 +2,7 @@
 
 namespace Ashfall.Session.Maps;
 
-/// <summary>Picks the hand-made map for a player count until procedural maps arrive in M4.</summary>
+/// <summary>The hand-made maps by player count: the duel map for two, the quad map for three or four. Generated maps come from Ashfall.MapGen.</summary>
 public static class SkirmishMaps
 {
     public const int MaxPlayers = QuadMap.MaxPlayers;

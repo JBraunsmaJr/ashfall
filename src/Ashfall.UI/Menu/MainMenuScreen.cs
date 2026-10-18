@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Numerics;
+using Ashfall.MapGen;
 using Ashfall.Rendering;
 using Ashfall.Rendering.Scene;
 using Ashfall.UI.Drawing;
@@ -10,8 +11,10 @@ namespace Ashfall.UI.Menu;
 
 /// <summary>
 /// The title screen: start a skirmish, host a lobby or join one by address, without any command-line
-/// flags. Each page is laid out fresh every frame from the same widget list that handles clicks, so
-/// what is drawn is exactly what can be clicked. Tab moves between text boxes, Enter confirms, Esc goes back.
+/// flags. Skirmish and Host also pick the map: hand-made, or a generated archetype with its seed and
+/// sliders, previewed live as they change. Each page is laid out fresh every frame from the same widget
+/// list that handles clicks, so what is drawn is exactly what can be clicked. Tab moves between text
+/// boxes, Enter confirms, Esc goes back.
 /// </summary>
 public sealed class MainMenuScreen
 {
@@ -19,15 +22,21 @@ public sealed class MainMenuScreen
 
     private readonly List<Widget> _widgets = [];
     private readonly List<(float X, float Y, string Text, float Size, LinearColor Color, bool Centered)> _labels = [];
+    private readonly List<(float X, float Y, float Size)> _previews = [];
     private readonly TextField _name = new("NAME", 16, TextField.IsNameChar);
     private readonly TextField _seed = new("SEED", 19, char.IsAsciiDigit);
     private readonly TextField _port = new("PORT", 5, char.IsAsciiDigit);
     private readonly TextField _address = new("ADDRESS", 64, TextField.IsAddressChar);
+    private readonly TextField _mapSeed = new("MAP SEED", 10, char.IsAsciiDigit);
+    private readonly TextField _mapCode = new("CODE", 28, c => char.IsAsciiLetterOrDigit(c) || c == '-');
     private readonly IReadOnlyList<string> _recentHosts;
+    private readonly int[] _sliders = new int[MapSettings.SliderCount];
+    private MapArchetype? _archetype;
     private Page _page = Page.Main;
     private bool _idleOpponent;
     private int _humans;
     private int _ais;
+    private MapSlider? _dragging;
     private Vector2 _framebuffer = new(1280, 720);
     private Vector2 _mouse;
     private double _time;
@@ -44,6 +53,7 @@ public sealed class MainMenuScreen
         _idleOpponent = settings.IdleOpponent;
         _humans = settings.Humans;
         _ais = settings.Ais;
+        SetMap(settings.Map);
         Message = message;
     }
 
@@ -64,6 +74,14 @@ public sealed class MainMenuScreen
     /// <summary>The page on screen: Main, Skirmish, Host or Join.</summary>
     public string CurrentPage => _page.ToString();
 
+    /// <summary>The live map preview on the Skirmish and Host pages.</summary>
+    public MapPreview Preview { get; init; } = new();
+
+    /// <summary>The generated map as currently set up, or null for the hand-made map.</summary>
+    public MapSettings? Map => _archetype is null
+        ? null
+        : new MapSettings(_archetype, uint.TryParse(_mapSeed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var seed) ? seed : 1, _sliders);
+
     /// <summary>The settings as currently entered (what gets remembered for next time).</summary>
     public MenuSettings Settings => new()
     {
@@ -73,16 +91,17 @@ public sealed class MainMenuScreen
         Humans = _humans,
         Ais = _ais,
         Port = ParsePort(_port.Text) ?? HostAddress.DefaultPort,
+        Map = Map,
         RecentHosts = _recentHosts,
     };
 
-    /// <summary>Every clickable thing on the current page with its label and centre, for tests and automation.</summary>
-    public IEnumerable<(string Label, Vector2 Center, bool Enabled)> Targets
+    /// <summary>Every clickable thing on the current page with its label, centre and size, for tests and automation.</summary>
+    public IEnumerable<(string Label, Vector2 Center, Vector2 Size, bool Enabled)> Targets
     {
         get
         {
             Layout();
-            return _widgets.Select(w => (w.Field?.Label ?? w.Text, new Vector2(w.X + (w.W / 2), w.Y + (w.H / 2)), w.Enabled)).ToList();
+            return _widgets.Select(w => (w.Field?.Label ?? w.Text, new Vector2(w.X + (w.W / 2), w.Y + (w.H / 2)), new Vector2(w.W, w.H), w.Enabled)).ToList();
         }
     }
 
@@ -117,7 +136,24 @@ public sealed class MainMenuScreen
 
         foreach (var field in fields)
         {
-            field.Edit(input);
+            if (field.Edit(input) && field == _mapCode && MapSettings.TryParseCode(_mapCode.Text, out var pasted))
+            {
+                SetMap(pasted);
+                _mapCode.Focused = true;
+            }
+        }
+
+        // Dragging a slider bar: the value follows the mouse until the button comes up.
+        if (_dragging is { } dragging)
+        {
+            if (input.IsDown(MouseButton.Left) && _widgets.FirstOrDefault(w => w.Bar == dragging) is { } bar)
+            {
+                SetSlider(dragging, (int)MathF.Round(Math.Clamp((input.Mouse.X - bar.X) / bar.W, 0f, 1f) * 100f));
+            }
+            else
+            {
+                _dragging = null;
+            }
         }
 
         if (input.WasPressed(Key.Enter))
@@ -143,6 +179,11 @@ public sealed class MainMenuScreen
                 if (widget.Field is { } field)
                 {
                     Focus(field);
+                }
+                else if (widget.Bar is { } slider)
+                {
+                    _dragging = slider;
+                    SetSlider(slider, (int)MathF.Round(Math.Clamp((input.Mouse.X - widget.X) / widget.W, 0f, 1f) * 100f));
                 }
                 else if (widget.Enabled)
                 {
@@ -183,11 +224,29 @@ public sealed class MainMenuScreen
                 continue;
             }
 
+            if (widget.Bar is { } slider)
+            {
+                // Track, fill to the value, and a handle.
+                var value = _sliders[(int)slider] / 100f;
+                var trackY = widget.Y + (widget.H / 2) - (3 * scale);
+                canvas.Rect(widget.X, trackY, widget.W, 6 * scale, Palette.Button);
+                canvas.Rect(widget.X, trackY, widget.W * value, 6 * scale, Palette.Scale(Palette.Cindrite, hovered || _dragging == slider ? 0.9f : 0.7f));
+                canvas.Rect(widget.X + (widget.W * value) - (3 * scale), widget.Y + (2 * scale), 6 * scale, widget.H - (4 * scale), Palette.Text);
+                continue;
+            }
+
             var fill = !widget.Enabled ? Palette.Button : widget.Selected ? Palette.ButtonActive : hovered ? Palette.ButtonHover : Palette.PanelLight;
             canvas.Rect(widget.X, widget.Y, widget.W, widget.H, fill);
             canvas.Frame(widget.X, widget.Y, widget.W, widget.H, scale, widget.Enabled ? (widget.Primary ? Palette.Credits : Palette.PanelEdge) : Palette.Button);
-            canvas.TextCentered(widget.X + (widget.W / 2), widget.Y + ((widget.H - (PixelFont.GlyphHeight * 2 * scale)) / 2), widget.Text, 2 * scale,
+            // Labels too wide for their button drop to a smaller size rather than spill out.
+            var textScale = PixelFont.Measure(widget.Text, 2 * scale) <= widget.W - (8 * scale) ? 2 * scale : 1.5f * scale;
+            canvas.TextCentered(widget.X + (widget.W / 2), widget.Y + ((widget.H - (PixelFont.GlyphHeight * textScale)) / 2), widget.Text, textScale,
                 widget.Enabled ? Palette.Text : Palette.TextDim);
+        }
+
+        foreach (var (x, y, size) in _previews)
+        {
+            Preview.Draw(canvas, x, y, size, 1.5f * scale);
         }
 
         foreach (var (x, y, text, size, color, centered) in _labels)
@@ -205,11 +264,13 @@ public sealed class MainMenuScreen
 
     private float Scale => _framebuffer.Y >= 1300 ? 2f : _framebuffer.Y >= 960 ? 1.5f : 1f;
 
+    private bool Wide => _page is Page.Skirmish or Page.Host;
+
     private (float Left, float Top, float Width, float Height) PanelRect()
     {
         var scale = Scale;
-        var width = Math.Min(_framebuffer.X - (40 * scale), 560 * scale);
-        var top = Math.Max(110 * scale, _framebuffer.Y * 0.2f);
+        var width = Math.Min(_framebuffer.X - (40 * scale), (Wide ? 920 : 560) * scale);
+        var top = Wide ? 70 * scale : Math.Max(110 * scale, _framebuffer.Y * 0.2f);
         return ((_framebuffer.X - width) / 2f, top, width, Math.Max(100 * scale, _contentBottom - top + (8 * scale)));
     }
 
@@ -217,7 +278,8 @@ public sealed class MainMenuScreen
     private void DrawBackdrop(Canvas canvas)
     {
         var scale = Scale;
-        canvas.TextCentered(_framebuffer.X / 2, Math.Max(8 * scale, PanelRect().Top - (70 * scale)), "ASHFALL", 9 * scale, Palette.Cindrite);
+        var titleScale = (Wide ? 6 : 9) * scale;
+        canvas.TextCentered(_framebuffer.X / 2, Math.Max(8 * scale, PanelRect().Top - (PixelFont.GlyphHeight * titleScale) - (10 * scale)), "ASHFALL", titleScale, Palette.Cindrite);
         for (var i = 0; i < 40; i++)
         {
             var phase = (float)((_time * (0.02 + ((i % 7) * 0.006))) + (i * 0.618)) % 1f;
@@ -232,6 +294,7 @@ public sealed class MainMenuScreen
     {
         _widgets.Clear();
         _labels.Clear();
+        _previews.Clear();
         var scale = Scale;
         var (left, top, width, _) = PanelRect();
         var center = left + (width / 2);
@@ -241,6 +304,10 @@ public sealed class MainMenuScreen
         var rowHeight = 30 * scale;
         var buttonHeight = 34 * scale;
 
+        // Setup pages have two columns: the player's settings and the preview on the left, the map on the right.
+        var columnWidth = Wide ? (innerWidth - (24 * scale)) / 2 : innerWidth;
+        var x0 = inner;
+
         void Heading(string text)
         {
             _labels.Add((center, y, text, 3 * scale, Palette.Credits, true));
@@ -249,41 +316,130 @@ public sealed class MainMenuScreen
 
         void Note(string text, LinearColor color)
         {
-            foreach (var line in Wrap(text, innerWidth, 1.5f * scale))
+            foreach (var line in Wrap(text, columnWidth, 1.5f * scale))
             {
-                _labels.Add((inner, y, line, 1.5f * scale, color, false));
+                _labels.Add((x0, y, line, 1.5f * scale, color, false));
                 y += 13 * scale;
             }
 
             y += 3 * scale;
         }
 
-        void FieldRow(TextField field)
+        void FieldRow(TextField field, float labelWidth = 130)
         {
-            _labels.Add((inner, y + (8 * scale), field.Label, 2 * scale, Palette.TextDim, false));
-            _widgets.Add(new Widget(inner + (130 * scale), y, innerWidth - (130 * scale), rowHeight, string.Empty, null, true) { Field = field });
+            _labels.Add((x0, y + (8 * scale), field.Label, 2 * scale, Palette.TextDim, false));
+            _widgets.Add(new Widget(x0 + (labelWidth * scale), y, columnWidth - (labelWidth * scale), rowHeight, string.Empty, null, true) { Field = field });
             y += rowHeight + (10 * scale);
         }
 
         void Stepper(string label, int value, Action down, bool canDown, Action up, bool canUp)
         {
-            _labels.Add((inner, y + (8 * scale), label, 2 * scale, Palette.TextDim, false));
-            var x = inner + (130 * scale);
+            _labels.Add((x0, y + (8 * scale), label, 2 * scale, Palette.TextDim, false));
+            var x = x0 + (130 * scale);
             _widgets.Add(new Widget(x, y, 30 * scale, rowHeight, "-", down, canDown));
             _labels.Add((x + (60 * scale), y + (8 * scale), value.ToString(CultureInfo.InvariantCulture), 2 * scale, Palette.Text, true));
             _widgets.Add(new Widget(x + (90 * scale), y, 30 * scale, rowHeight, "+", up, canUp));
             y += rowHeight + (10 * scale);
         }
 
+        void Choices(string label, IReadOnlyList<(string Text, bool Selected, Action Click)> options, float labelWidth = 130)
+        {
+            _labels.Add((x0, y + (8 * scale), label, 2 * scale, Palette.TextDim, false));
+            var available = columnWidth - (labelWidth * scale);
+            var gap = 8 * scale;
+            var each = (available - (gap * (options.Count - 1))) / options.Count;
+            for (var i = 0; i < options.Count; i++)
+            {
+                var (text, selected, click) = options[i];
+                _widgets.Add(new Widget(x0 + (labelWidth * scale) + (i * (each + gap)), y, each, rowHeight, text, click, true) { Selected = selected });
+            }
+
+            y += rowHeight + (10 * scale);
+        }
+
         void Actions(string primary, Action confirm, bool enabled)
         {
             y += 10 * scale;
-            var half = (innerWidth - (16 * scale)) / 2;
-            _widgets.Add(new Widget(inner, y, half, buttonHeight, "BACK", () => Go(Page.Main), true));
-            _widgets.Add(new Widget(inner + half + (16 * scale), y, half, buttonHeight, primary, confirm, enabled) { Primary = true });
+            var half = Math.Min((innerWidth - (16 * scale)) / 2, 260 * scale);
+            var right = inner + innerWidth;
+            _widgets.Add(new Widget(right - (2 * half) - (16 * scale), y, half, buttonHeight, "BACK", () => Go(Page.Main), true));
+            _widgets.Add(new Widget(right - half, y, half, buttonHeight, primary, confirm, enabled) { Primary = true });
             y += buttonHeight + (14 * scale);
         }
 
+        // The map column: archetype, seed, sliders, code, limits. Returns the bottom of the column.
+        float MapColumn(float columnTop, int players)
+        {
+            x0 = inner + columnWidth + (24 * scale);
+            y = columnTop;
+            var options = new List<(string, bool, Action)> { ("HAND-MADE", _archetype is null, () => SetMap(null)) };
+            foreach (var archetype in MapArchetypes.All)
+            {
+                var target = archetype;
+                options.Add((archetype.Name.ToUpperInvariant(), _archetype == archetype, () => SetMap(new MapSettings(target, MapSeedOrRandom()))));
+            }
+
+            Choices("MAP", options, 70);
+            if (_archetype is null)
+            {
+                Note(players <= 2
+                    ? "THE HAND-MADE DUEL MAP: A RIDGE WITH THREE GAPS, A FIELD PER BASE AND A RICH CENTRE."
+                    : "THE HAND-MADE QUAD MAP: FOUR CORNERS SPLIT BY WALLS, A RICH OPEN CENTRE.", Palette.TextDim);
+                return y;
+            }
+
+            Note(_archetype.Description.ToUpperInvariant(), Palette.TextDim);
+            _labels.Add((x0, y + (8 * scale), _mapSeed.Label, 2 * scale, Palette.TextDim, false));
+            _widgets.Add(new Widget(x0 + (110 * scale), y, columnWidth - (230 * scale), rowHeight, string.Empty, null, true) { Field = _mapSeed });
+            _widgets.Add(new Widget(x0 + columnWidth - (110 * scale), y, 110 * scale, rowHeight, "NEW MAP", NewMapSeed, true));
+            y += rowHeight + (10 * scale);
+
+            foreach (var slider in Enum.GetValues<MapSlider>())
+            {
+                var rule = _archetype.Rule(slider);
+                var value = _sliders[(int)slider];
+                var limited = value < rule.Min || value > rule.Max;
+                _labels.Add((x0, y + (6 * scale), SliderName(slider), 2 * scale, Palette.TextDim, false));
+                _widgets.Add(new Widget(x0 + (130 * scale), y, columnWidth - (180 * scale), 22 * scale, SliderName(slider), null, true) { Bar = slider });
+                _labels.Add((x0 + columnWidth - (40 * scale), y + (6 * scale), value.ToString(CultureInfo.InvariantCulture), 2 * scale, limited ? Palette.TextWarn : Palette.Text, false));
+                y += 28 * scale;
+            }
+
+            y += 6 * scale;
+            if (!_mapCode.Focused)
+            {
+                _mapCode.Text = Map!.ToCode();
+            }
+
+            FieldRow(_mapCode, 70);
+            if (Preview.Map?.Generated is { } generated && generated.Requested.Equals(Map))
+            {
+                foreach (var clamp in generated.Clamps)
+                {
+                    Note(clamp.ToUpperInvariant(), Palette.TextWarn);
+                }
+            }
+
+            return y;
+        }
+
+        // The preview square in the left column, with a one-line summary under it.
+        void PreviewBlock(int players, float bottomLimit)
+        {
+            Preview.Request(Map, players);
+            var size = Math.Max(120 * scale, Math.Min(columnWidth, bottomLimit - y - (20 * scale)));
+            _previews.Add((x0, y, size));
+            y += size + (6 * scale);
+            var map = Preview.Map;
+            var summary = map is null ? "GENERATING..."
+                : map.Generated is { } generated
+                    ? string.Create(CultureInfo.InvariantCulture, $"{map.Grid.Width}X{map.Grid.Height}, {players} PLAYERS, FAIRNESS {generated.Report.FairnessScore}{(generated.FellBack ? ", PLAIN FALLBACK" : string.Empty)}")
+                    : string.Create(CultureInfo.InvariantCulture, $"{map.Name.ToUpperInvariant()} MAP, {map.Grid.Width}X{map.Grid.Height}");
+            _labels.Add((x0, y, summary, 1.5f * scale, Palette.TextDim, false));
+            y += 16 * scale;
+        }
+
+        var bottom = _framebuffer.Y - (70 * scale);
         switch (_page)
         {
             case Page.Main:
@@ -315,29 +471,27 @@ public sealed class MainMenuScreen
             case Page.Skirmish:
             {
                 Heading("SKIRMISH");
-                _labels.Add((inner, y + (8 * scale), "OPPONENT", 2 * scale, Palette.TextDim, false));
-                var half = (innerWidth - (130 * scale) - (10 * scale)) / 2;
-                _widgets.Add(new Widget(inner + (130 * scale), y, half, rowHeight, "SCRIPTED AI", () => _idleOpponent = false, true) { Selected = !_idleOpponent });
-                _widgets.Add(new Widget(inner + (140 * scale) + half, y, half, rowHeight, "IDLE", () => _idleOpponent = true, true) { Selected = _idleOpponent });
+                var columnTop = y;
+                Choices("OPPONENT", [("SCRIPTED AI", !_idleOpponent, () => _idleOpponent = false), ("IDLE", _idleOpponent, () => _idleOpponent = true)]);
+                _labels.Add((x0, y + (8 * scale), _seed.Label, 2 * scale, Palette.TextDim, false));
+                _widgets.Add(new Widget(x0 + (130 * scale), y, columnWidth - (250 * scale), rowHeight, string.Empty, null, true) { Field = _seed });
+                _widgets.Add(new Widget(x0 + columnWidth - (110 * scale), y, 110 * scale, rowHeight, "RANDOM", RandomSeed, true));
                 y += rowHeight + (10 * scale);
-                _labels.Add((inner, y + (8 * scale), _seed.Label, 2 * scale, Palette.TextDim, false));
-                _widgets.Add(new Widget(inner + (130 * scale), y, innerWidth - (250 * scale), rowHeight, string.Empty, null, true) { Field = _seed });
-                _widgets.Add(new Widget(inner + innerWidth - (110 * scale), y, 110 * scale, rowHeight, "RANDOM", RandomSeed, true));
-                y += rowHeight + (10 * scale);
-                Note("ONE VERSUS ONE ON THE DUEL MAP. IDLE NEVER ACTS: USE IT TO LEARN THE CONTROLS.", Palette.TextDim);
                 var seedOk = ulong.TryParse(_seed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out _);
-                if (!seedOk)
-                {
-                    Note("ENTER A NUMBER FOR THE SEED.", Palette.TextWarn);
-                }
-
-                Actions("START", () => Choose(MenuAction.Skirmish), seedOk);
+                Note(seedOk ? "ONE VERSUS ONE. IDLE NEVER ACTS: USE IT TO LEARN THE CONTROLS." : "ENTER A NUMBER FOR THE SEED.", seedOk ? Palette.TextDim : Palette.TextWarn);
+                PreviewBlock(2, bottom);
+                var leftBottom = y;
+                var rightBottom = MapColumn(columnTop, 2);
+                x0 = inner;
+                y = Math.Max(leftBottom, rightBottom);
+                Actions("START", () => Choose(MenuAction.Skirmish), seedOk && MapOk());
                 break;
             }
 
             case Page.Host:
             {
                 Heading("HOST GAME");
+                var columnTop = y;
                 FieldRow(_name);
                 var total = _humans + _ais;
                 Stepper("PLAYERS", _humans, () => _humans--, _humans > 1 && total > 2, () => _humans++, total < MaxPlayers);
@@ -345,16 +499,20 @@ public sealed class MainMenuScreen
                 FieldRow(_port);
                 var port = ParsePort(_port.Text);
                 Note(port is { } p
-                    ? string.Create(CultureInfo.InvariantCulture, $"PLAYERS COUNTS YOU. FOR INTERNET PLAY, FORWARD UDP PORT {p} TO THIS PC.")
+                    ? string.Create(CultureInfo.InvariantCulture, $"PLAYERS COUNTS YOU. FOR INTERNET PLAY, FORWARD UDP PORT {p} TO THIS PC; FRIENDS JOIN WITH YOUR PUBLIC IP.")
                     : "PORT MUST BE A NUMBER FROM 1 TO 65535.", port is null ? Palette.TextWarn : Palette.TextDim);
-                Note("FRIENDS JOIN WITH YOUR PUBLIC IP ADDRESS (OR LAN ADDRESS AT HOME).", Palette.TextDim);
                 var nameOk = _name.Text.Trim().Length > 0;
                 if (!nameOk)
                 {
                     Note("ENTER A NAME.", Palette.TextWarn);
                 }
 
-                Actions("HOST", () => Choose(MenuAction.Host), nameOk && port is not null);
+                PreviewBlock(total, bottom);
+                var leftBottom = y;
+                var rightBottom = MapColumn(columnTop, total);
+                x0 = inner;
+                y = Math.Max(leftBottom, rightBottom);
+                Actions("HOST", () => Choose(MenuAction.Host), nameOk && port is not null && MapOk());
                 break;
             }
 
@@ -365,7 +523,7 @@ public sealed class MainMenuScreen
                 FieldRow(_address);
                 var addressOk = HostAddress.TryParse(_address.Text, out _, out _);
                 Note(addressOk || _address.Text.Length == 0
-                    ? "THE HOST'S ADDRESS, E.G. 203.0.113.7 OR 192.168.1.20:47600 (PORT DEFAULTS TO 47600)."
+                    ? "THE HOST'S ADDRESS, E.G. 203.0.113.7 OR 192.168.1.20:47600 (PORT DEFAULTS TO 47600). THE HOST CHOOSES THE MAP."
                     : "THAT DOES NOT LOOK LIKE AN ADDRESS: USE HOST OR HOST:PORT.", addressOk || _address.Text.Length == 0 ? Palette.TextDim : Palette.TextWarn);
                 if (_recentHosts.Count > 0)
                 {
@@ -397,10 +555,43 @@ public sealed class MainMenuScreen
         _contentBottom = y;
     }
 
+    private bool MapOk() => _archetype is null || uint.TryParse(_mapSeed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out _);
+
+    private void SetMap(MapSettings? map)
+    {
+        _archetype = map?.Archetype;
+        if (map is null)
+        {
+            return;
+        }
+
+        _mapSeed.Text = map.Seed.ToString(CultureInfo.InvariantCulture);
+        for (var i = 0; i < _sliders.Length; i++)
+        {
+            _sliders[i] = map.Sliders[i];
+        }
+    }
+
+    private void SetSlider(MapSlider slider, int value) => _sliders[(int)slider] = Math.Clamp(value, 0, 100);
+
+    private uint MapSeedOrRandom() =>
+        uint.TryParse(_mapSeed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var seed) ? seed : (uint)Random.Shared.Next(1, int.MaxValue);
+
+    private void NewMapSeed() => _mapSeed.Text = ((uint)Random.Shared.Next(1, int.MaxValue)).ToString(CultureInfo.InvariantCulture);
+
+    private static string SliderName(MapSlider slider) => slider switch
+    {
+        MapSlider.BaseSpacing => "SPACING",
+        MapSlider.Chokepoints => "CHOKES",
+        MapSlider.Vegetation => "TREES",
+        _ => slider.ToString().ToUpperInvariant(),
+    };
+
     private void Go(Page page)
     {
         _page = page;
         Message = null;
+        _dragging = null;
         Focus(null);
         if (page == Page.Join)
         {
@@ -410,7 +601,7 @@ public sealed class MainMenuScreen
 
     private void Focus(TextField? field)
     {
-        foreach (var f in new[] { _name, _seed, _port, _address })
+        foreach (var f in new[] { _name, _seed, _port, _address, _mapSeed, _mapCode })
         {
             f.Focused = f == field;
         }
@@ -471,6 +662,9 @@ public sealed class MainMenuScreen
     private sealed record Widget(float X, float Y, float W, float H, string Text, Action? Click, bool Enabled)
     {
         public TextField? Field { get; init; }
+
+        /// <summary>A slider bar: clicking or dragging along it sets this slider.</summary>
+        public MapSlider? Bar { get; init; }
 
         public bool Primary { get; init; }
 

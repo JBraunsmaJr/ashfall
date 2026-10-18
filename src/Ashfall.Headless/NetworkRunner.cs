@@ -170,7 +170,7 @@ internal static class NetworkRunner
         }
     }
 
-    private static HostSettings Settings(HeadlessOptions options) => HostSettings.For(options.Humans, options.Ais, options.Seed) with
+    private static HostSettings Settings(HeadlessOptions options) => HostSettings.For(options.Humans, options.Ais, options.Seed, options.GeneratedMap) with
     {
         Teams = options.Teams,
         InputDelay = options.InputDelay,

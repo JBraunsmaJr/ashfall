@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ashfall.MapGen;
 using Ashfall.Session;
 
 namespace Ashfall.Headless;
@@ -18,6 +19,11 @@ internal sealed record HeadlessOptions
                                   Skirmish: tick limit (default 54000 = 60 minutes); exit code 3 if no winner
           --players <n>           Proving: players, 1-8 (default 2). Skirmish: 2-4 (3-4 play on the quad map)
           --teams <list>          Skirmish: team per player, e.g. 0,1,0,1 (default: free-for-all)
+          --archetype <id>        Skirmish/host: play a generated map (crossroads or riverlands)
+          --map-seed <n>          Generated map seed (default: the match seed)
+          --slider <name=value>   Generated map slider 0-100 (size, richness, elevation, water,
+                                  chokepoints, basespacing, vegetation); repeatable
+          --map-code <code>       Generated map from a shareable map code (e.g. CRS-...)
           --units <n>             Proving only: units per player (default 100)
           --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
@@ -108,9 +114,42 @@ internal sealed record HeadlessOptions
 
     public bool IsNetwork => Host || Join is not null || Rejoin is not null || Lan > 0;
 
+    public MapArchetype? Archetype { get; init; }
+
+    public uint? MapSeed { get; init; }
+
+    public IReadOnlyList<(MapSlider Slider, int Value)> Sliders { get; init; } = [];
+
+    public MapSettings? MapCode { get; init; }
+
+    /// <summary>The generated map these options ask for, or null for the hand-made one.</summary>
+    public MapSettings? GeneratedMap
+    {
+        get
+        {
+            if (MapCode is not null)
+            {
+                return MapCode;
+            }
+
+            if (Archetype is null)
+            {
+                return null;
+            }
+
+            var settings = new MapSettings(Archetype, MapSeed ?? (uint)(Seed & uint.MaxValue));
+            foreach (var (slider, value) in Sliders)
+            {
+                settings = settings.With(slider, value);
+            }
+
+            return settings;
+        }
+    }
+
     public MatchSpec ToMatchSpec() =>
         Mode == MatchMode.Skirmish
-            ? Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])
+            ? (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap)
             : MatchSpec.ProvingGround(Seed)
                 .WithPlayers(Players)
                 .WithUnitsPerPlayer(Units)
@@ -168,6 +207,10 @@ internal sealed record HeadlessOptions
                 "--input-delay" => TryInt32(value, 0, v => options = options with { InputDelay = v }),
                 "--lan" => TryInt32(value, 2, v => options = options with { Lan = v, Mode = MatchMode.Skirmish }),
                 "--timeout" => TryInt32(value, 1, v => options = options with { TimeoutSeconds = v }),
+                "--archetype" => MapArchetypes.Find(value) is { } archetype && Set(() => options = options with { Archetype = archetype, Mode = MatchMode.Skirmish }),
+                "--map-seed" => TryInt64(value, 0, v => options = options with { MapSeed = (uint)(v & uint.MaxValue) }),
+                "--slider" => TrySlider(value, v => options = options with { Sliders = [.. options.Sliders, v] }),
+                "--map-code" => MapSettings.TryParseCode(value, out var code) && Set(() => options = options with { MapCode = code, Mode = MatchMode.Skirmish }),
                 _ => false,
             };
 
@@ -179,6 +222,26 @@ internal sealed record HeadlessOptions
         }
 
         return options;
+    }
+
+    private static bool TrySlider(string text, Action<(MapSlider, int)> apply)
+    {
+        var parts = text.Split('=');
+        if (parts.Length != 2 || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value > 100)
+        {
+            return false;
+        }
+
+        foreach (var slider in Enum.GetValues<MapSlider>())
+        {
+            if (string.Equals(slider.ToString(), parts[0], StringComparison.OrdinalIgnoreCase))
+            {
+                apply((slider, value));
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryTeams(string text, Action<IReadOnlyList<int>> apply)

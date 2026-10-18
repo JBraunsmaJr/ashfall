@@ -41,7 +41,7 @@ internal static class MultiplayerClient
         var identity = NetworkIdentity.LoadOrCreate(NetworkIdentity.DefaultPath, options.Name);
         var networkOptions = new NetworkOptions { Speed = GameSpeed.RealTime, Bot = options.Autopilot };
         using var session = options.Host
-            ? NetworkSession.Host(transport, identity, HostSettings.For(options.Humans, options.Ais, options.Seed), networkOptions)
+            ? NetworkSession.Host(transport, identity, HostSettings.For(options.Humans, options.Ais, options.Seed, options.GeneratedMap), networkOptions)
             : options.Rejoin is { } rejoin
                 ? NetworkSession.Rejoin(transport, identity, IPEndPoint.Parse(rejoin), networkOptions)
                 : NetworkSession.Join(transport, identity, IPEndPoint.Parse(options.Join!), networkOptions);

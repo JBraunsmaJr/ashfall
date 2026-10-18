@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using Ashfall.MapGen;
 using Ashfall.Session;
 
 namespace Ashfall.UI.Menu;
@@ -24,6 +25,9 @@ public sealed record MenuSettings
 
     public int Port { get; init; } = HostAddress.DefaultPort;
 
+    /// <summary>The generated map for skirmish and hosting, or null for the hand-made map.</summary>
+    public MapSettings? Map { get; init; } = MapSettings.Default(MapArchetypes.Crossroads, 1);
+
     /// <summary>Most recent first, as typed (host or host:port).</summary>
     public IReadOnlyList<string> RecentHosts { get; init; } = [];
 
@@ -47,6 +51,7 @@ public sealed record MenuSettings
             "humans=" + Humans.ToString(CultureInfo.InvariantCulture),
             "ais=" + Ais.ToString(CultureInfo.InvariantCulture),
             "port=" + Port.ToString(CultureInfo.InvariantCulture),
+            "map=" + (Map?.ToCode() ?? "hand-made"),
         };
         lines.AddRange(RecentHosts.Select(h => "recent=" + h));
         return string.Join('\n', lines) + "\n";
@@ -86,6 +91,12 @@ public sealed record MenuSettings
                     break;
                 case "port" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port is >= 1 and <= 65535:
                     settings = settings with { Port = port };
+                    break;
+                case "map" when value == "hand-made":
+                    settings = settings with { Map = null };
+                    break;
+                case "map" when MapSettings.TryParseCode(value, out var map):
+                    settings = settings with { Map = map };
                     break;
                 case "recent" when HostAddress.TryParse(value, out _, out _) && recent.Count < MaxRecentHosts:
                     recent.Add(value);

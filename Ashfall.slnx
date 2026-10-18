@@ -3,6 +3,7 @@
     <Project Path="src/Ashfall.Core/Ashfall.Core.csproj" />
     <Project Path="src/Ashfall.Content/Ashfall.Content.csproj" />
     <Project Path="src/Ashfall.Simulation/Ashfall.Simulation.csproj" />
+    <Project Path="src/Ashfall.MapGen/Ashfall.MapGen.csproj" />
     <Project Path="src/Ashfall.Networking/Ashfall.Networking.csproj" />
     <Project Path="src/Ashfall.Session/Ashfall.Session.csproj" />
     <Project Path="src/Ashfall.Headless/Ashfall.Headless.csproj" />
@@ -10,9 +11,13 @@
     <Project Path="src/Ashfall.UI/Ashfall.UI.csproj" />
     <Project Path="src/Ashfall.Client/Ashfall.Client.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Ashfall.Tools.MapPreview/Ashfall.Tools.MapPreview.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Ashfall.Core.Tests/Ashfall.Core.Tests.csproj" />
     <Project Path="tests/Ashfall.Simulation.Tests/Ashfall.Simulation.Tests.csproj" />
+    <Project Path="tests/Ashfall.MapGen.Tests/Ashfall.MapGen.Tests.csproj" />
     <Project Path="tests/Ashfall.E2E.Tests/Ashfall.E2E.Tests.csproj" />
     <Project Path="tests/Ashfall.Determinism.Tests/Ashfall.Determinism.Tests.csproj" />
     <Project Path="tests/Ashfall.Architecture.Tests/Ashfall.Architecture.Tests.csproj" />

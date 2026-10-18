@@ -19,21 +19,80 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 {
     private const float GroundEpsilon = 0.01f;
 
-    public void PaintTerrain(GameSimulation simulation, IsoCamera camera)
+    /// <summary>World height of one terrain level.</summary>
+    public const float LevelHeight = 0.32f;
+
+    /// <summary>Ground height (world z) under a world point: its cell's level, halfway on ramps, sea level on water.</summary>
+    public static float GroundHeight(GridMap map, float x, float y)
+    {
+        var cell = new Cell((int)MathF.Floor(x), (int)MathF.Floor(y));
+        if (!map.InBounds(cell))
+        {
+            return 0f;
+        }
+
+        var level = map.HeightAt(cell);
+        return map.TerrainAt(cell) switch
+        {
+            Terrain.Water or Terrain.Bridge => 0f,
+            Terrain.Ramp => Math.Max(0f, (level - 0.5f) * LevelHeight),
+            _ => level * LevelHeight,
+        };
+    }
+
+    // The drawn top of a cell's ground: water sits a little below land.
+    private static float SurfaceHeight(GridMap map, Cell cell) =>
+        map.TerrainAt(cell) is Terrain.Water or Terrain.Bridge ? -0.06f : GroundHeight(map, cell.X, cell.Y);
+
+    public void PaintTerrain(GameSimulation simulation, IsoCamera camera, double time)
     {
         var map = simulation.Map;
         var (minX, minY, maxX, maxY) = VisibleCells(camera, map);
 
-        // Ground is one flat layer under everything, so it needs no sorting: one object for all of it.
+        // Ground is one layer under everything, so it needs no sorting: one object for all of it.
         batch.Begin(float.MinValue);
         for (var y = minY; y <= maxY; y++)
         {
             for (var x = minX; x <= maxX; x++)
             {
                 var cell = new Cell(x, y);
-                var cindrite = map.CindriteAt(cell);
-                var color = Variation(cindrite > 0 ? Palette.CindriteGround : Palette.Ground, x, y, 0.07f);
-                batch.Flat(x, y, 1, 1, 0, color);
+                var top = SurfaceHeight(map, cell);
+                LinearColor color;
+                switch (map.TerrainAt(cell))
+                {
+                    case Terrain.Water:
+                    case Terrain.Bridge:
+                        // A gentle shimmer: each cell's brightness drifts on its own phase.
+                        var shimmer = 0.5f + (0.5f * MathF.Sin((float)(time * 1.3) + (Hash(x, y) % 628 / 100f)));
+                        color = Palette.Mix(Palette.Water, Palette.WaterLight, shimmer * 0.25f);
+                        batch.Flat(x, y, 1, 1, top, color, emissive: 0.08f);
+                        break;
+                    case Terrain.Ramp:
+                        color = Variation(Palette.Ramp, x, y, 0.06f);
+                        batch.Flat(x, y, 1, 1, top, color);
+                        break;
+                    default:
+                        var cindrite = map.CindriteAt(cell);
+                        color = Palette.Scale(Variation(cindrite > 0 ? Palette.CindriteGround : Palette.Ground, x, y, 0.07f), 1f + (map.HeightAt(cell) * 0.05f));
+                        batch.Flat(x, y, 1, 1, top, color);
+                        break;
+                }
+
+                // Skirts down to lower neighbours on the two sides the camera sees, so steps have faces, not cracks.
+                var side = Palette.Scale(color, 0.6f);
+                var east = new Cell(x + 1, y);
+                if (map.InBounds(east) && SurfaceHeight(map, east) < top)
+                {
+                    var low = SurfaceHeight(map, east);
+                    batch.Quad(new Vector3(x + 1, y, low), new Vector3(x + 1, y + 1, low), new Vector3(x + 1, y + 1, top), new Vector3(x + 1, y, top), Vector3.UnitX, side);
+                }
+
+                var south = new Cell(x, y + 1);
+                if (map.InBounds(south) && SurfaceHeight(map, south) < top)
+                {
+                    var low = SurfaceHeight(map, south);
+                    batch.Quad(new Vector3(x, y + 1, low), new Vector3(x + 1, y + 1, low), new Vector3(x + 1, y + 1, top), new Vector3(x, y + 1, top), Vector3.UnitY, side);
+                }
             }
         }
 
@@ -44,22 +103,56 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
             for (var x = minX; x <= maxX; x++)
             {
                 var cell = new Cell(x, y);
-                if (map.TerrainAt(cell) == Terrain.Rock)
+                var top = map.HeightAt(cell) * LevelHeight;
+                switch (map.TerrainAt(cell))
                 {
-                    batch.Begin(x + y + 1);
-                    var height = 0.3f + (Hash(x, y) % 4 * 0.06f);
-                    batch.Box(x, y, 1, 1, 0, height, Variation(Palette.Rock, x, y, 0.08f), Variation(Palette.RockTop, x, y, 0.08f));
-                    batch.End();
-                    continue;
+                    case Terrain.Rock:
+                        // Cliffs and outcrops: rock from the lowest ground up past the cell's level.
+                        batch.Begin(x + y + 1);
+                        var height = top + 0.3f + (Hash(x, y) % 4 * 0.06f);
+                        batch.Box(x, y, 1, 1, 0, height, Variation(Palette.Rock, x, y, 0.08f), Variation(Palette.RockTop, x, y, 0.08f));
+                        batch.End();
+                        continue;
+
+                    case Terrain.Trees:
+                        PaintTree(x, y, top);
+                        continue;
+
+                    case Terrain.Bridge:
+                        batch.Begin(x + y + 0.5f);
+                        batch.Box(x - 0.02f, y - 0.02f, 1.04f, 1.04f, -0.06f, 0.08f, Palette.Bridge, Variation(Palette.BridgeTop, x, y, 0.08f));
+                        batch.End();
+                        continue;
                 }
 
                 var cindrite = map.CindriteAt(cell);
                 if (cindrite > 0 && fog.At(x, y) > 0f)
                 {
-                    PaintCrystals(x, y, cindrite);
+                    PaintCrystals(x, y, cindrite, top);
                 }
             }
         }
+    }
+
+    private void PaintTree(int x, int y, float ground)
+    {
+        // One or two trees per cell, each a trunk under a stacked canopy, jittered so woods look natural.
+        var seed = Hash(x, y);
+        batch.Begin(x + y + 1, ground);
+        var count = 1 + (seed & 1);
+        for (var i = 0; i < count; i++)
+        {
+            var ox = 0.25f + (((seed >> (4 + (i * 6))) & 0xF) / 15f * 0.5f);
+            var oy = 0.25f + (((seed >> (8 + (i * 6))) & 0xF) / 15f * 0.5f);
+            var size = 0.22f + (((seed >> (12 + i)) & 0x3) * 0.04f);
+            var height = 0.5f + (((seed >> (16 + i)) & 0x3) * 0.08f);
+            batch.Disc(new Vector2(x + ox + 0.08f, y + oy - 0.04f), size * 1.2f, GroundEpsilon, Palette.Shadow);
+            batch.Box(x + ox - 0.04f, y + oy - 0.04f, 0.08f, 0.08f, 0, height * 0.4f, Palette.Trunk, Palette.Trunk);
+            batch.Box(x + ox - size, y + oy - size, size * 2, size * 2, height * 0.35f, height, Palette.Leaves, Palette.LeavesTop);
+            batch.Box(x + ox - (size * 0.6f), y + oy - (size * 0.6f), size * 1.2f, size * 1.2f, height, height + 0.18f, Palette.Leaves, Palette.LeavesTop);
+        }
+
+        batch.End();
     }
 
     public void PaintStructures(GameSimulation simulation, int localPlayer, ISet<Entity> selected, FrameScene scene)
@@ -81,7 +174,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
             }
 
             var progress = info.IsComplete ? 1f : 1f - (info.BuildRemaining / (float)definition.BuildTicks);
-            batch.Begin(info.Origin.X + definition.Width + info.Origin.Y + definition.Height - 1);
+            batch.Begin(info.Origin.X + definition.Width + info.Origin.Y + definition.Height - 1, GroundHeight(simulation.Map, centerX, centerY));
             PaintStructure(definition, info.Origin, owner, progress, scene);
             if (selected.Contains(entity))
             {
@@ -108,7 +201,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
             var definition = simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType);
             var heading = motion.HeadingOf(entity);
-            batch.Begin(position.X + position.Y);
+            batch.Begin(position.X + position.Y, GroundHeight(simulation.Map, position.X, position.Y));
             if (selected.Contains(entity))
             {
                 batch.Disc(position, definition.IsHarvester ? 0.62f : definition.Id == BulwarkContent.Warden ? 0.52f : 0.3f, GroundEpsilon * 2, Palette.Selection, emissive: 1f, shape: QuadShape.Ring);
@@ -126,7 +219,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
     public void PaintPlacement(GameSimulation simulation, int structureType, Cell origin, bool valid)
     {
         var definition = simulation.Content.Structure(structureType);
-        batch.Begin(float.MaxValue - 1);
+        batch.Begin(float.MaxValue - 1, GroundHeight(simulation.Map, origin.X + (definition.Width / 2f), origin.Y + (definition.Height / 2f)));
         for (var y = 0; y < definition.Height; y++)
         {
             for (var x = 0; x < definition.Width; x++)
@@ -205,7 +298,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 batch.Box(x + 0.15f, y + 0.15f, 0.4f, 0.4f, height, height + 0.55f, Palette.ConcreteDark, Palette.Metal);
                 batch.Box(x + width - 0.55f, y + depth - 0.55f, 0.4f, 0.4f, height, height + 0.55f, Palette.ConcreteDark, Palette.Metal);
                 batch.Disc(center, 0.22f, height + 0.08f, Palette.PowerGlow, emissive: 1f);
-                scene.AddLight(new PointLight(new Vector3(center, height + 0.6f), 3.2f, Palette.PowerGlow, 1.1f));
+                scene.AddLight(new PointLight(new Vector3(center, height + 0.6f + batch.Lift), 3.2f, Palette.PowerGlow, 1.1f));
                 break;
 
             case StructureRole.Refinery:
@@ -213,7 +306,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 batch.Box(x + 0.2f, y + 0.2f, 0.9f, 0.9f, height, height + 0.45f, Palette.Metal, Palette.Metal);
                 batch.Disc(new Vector2(x + 0.65f, y + 0.65f), 0.32f, height + 0.46f, Palette.Cindrite, emissive: 0.9f);
                 batch.Flat(origin.X + (definition.Width / 2f) - 0.5f, origin.Y + definition.Height + 0.02f, 1f, 0.6f, GroundEpsilon * 2, Palette.ConcreteDark);
-                scene.AddLight(new PointLight(new Vector3(x + 0.65f, y + 0.65f, height + 0.8f), 3f, Palette.Cindrite, 0.9f));
+                scene.AddLight(new PointLight(new Vector3(x + 0.65f, y + 0.65f, height + 0.8f + batch.Lift), 3f, Palette.Cindrite, 0.9f));
                 break;
 
             case StructureRole.Barracks:
@@ -234,7 +327,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         }
 
         // A warm work light at the front corner of every finished structure.
-        scene.AddLight(new PointLight(new Vector3(origin.X + definition.Width + 0.3f, origin.Y + definition.Height + 0.3f, 0.9f), 2.6f, Palette.BaseLight, 0.55f));
+        scene.AddLight(new PointLight(new Vector3(origin.X + definition.Width + 0.3f, origin.Y + definition.Height + 0.3f, 0.9f + batch.Lift), 2.6f, Palette.BaseLight, 0.55f));
     }
 
     private void PaintUnit(UnitDefinition definition, Vector2 position, float heading, float turret, int owner, float cargo)
@@ -274,12 +367,12 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         }
     }
 
-    private void PaintCrystals(int x, int y, int amount)
+    private void PaintCrystals(int x, int y, int amount, float ground)
     {
         // Two or three crystal clusters per cell, brighter and bigger the richer the cell.
         var richness = Math.Clamp(amount / 500f, 0.15f, 1f);
         var seed = Hash(x, y);
-        batch.Begin(x + y + 0.5f);
+        batch.Begin(x + y + 0.5f, ground);
         for (var i = 0; i < 3; i++)
         {
             var ox = 0.2f + ((seed >> (i * 4) & 0xF) / 15f * 0.6f);

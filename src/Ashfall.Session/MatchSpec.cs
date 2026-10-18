@@ -1,4 +1,5 @@
 using Ashfall.Core;
+using Ashfall.MapGen;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 
@@ -7,8 +8,8 @@ namespace Ashfall.Session;
 /// <summary>
 /// Everything needed to start a match identically on every peer. Two modes for now: the M0 "proving
 /// ground" (open map, wandering units, used to prove determinism) and the skirmish (2–4 Bulwark
-/// players on a hand-made map, any mix of people and AIs, in teams, played to victory). Map
-/// archetypes, sliders and AI tiers join the spec in later milestones.
+/// players on a hand-made or generated map, any mix of people and AIs, in teams, played to victory).
+/// AI tiers join the spec in a later milestone.
 /// </summary>
 public sealed record MatchSpec
 {
@@ -45,6 +46,9 @@ public sealed record MatchSpec
     /// </summary>
     public int InputDelay { get; init; }
 
+    /// <summary>Skirmish only: the procedural map to play on, or null for the hand-made duel/quad map.</summary>
+    public MapSettings? GeneratedMap { get; init; }
+
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
@@ -69,6 +73,19 @@ public sealed record MatchSpec
     }
 
     public MatchSpec WithPlayers(int players) => this with { Players = players };
+
+    /// <summary>Plays the skirmish on a generated map (its size comes from the settings).</summary>
+    public MatchSpec WithGeneratedMap(MapSettings? settings)
+    {
+        if (settings is null)
+        {
+            var size = SkirmishMaps.SizeFor(Players);
+            return this with { GeneratedMap = null, Map = new MapBounds(size, size) };
+        }
+
+        var generated = MapGenerator.SizeOf(MapGenerator.ApplyLimits(settings, out _));
+        return this with { GeneratedMap = settings, Map = new MapBounds(generated, generated) };
+    }
 
     /// <summary>Sets every player's team, in seat order.</summary>
     public MatchSpec WithTeams(params int[] teams) => this with { Teams = teams.ToArray() };
@@ -118,9 +135,10 @@ public sealed record MatchSpec
                 throw new ArgumentOutOfRangeException(nameof(Players), Players, $"Skirmish maps have 2 to {SkirmishMaps.MaxPlayers} start positions.");
             }
 
-            if (Map.Width != SkirmishMaps.SizeFor(Players) || Map.Height != SkirmishMaps.SizeFor(Players))
+            var size = GeneratedMap is { } generated ? MapGenerator.SizeOf(MapGenerator.ApplyLimits(generated, out _)) : SkirmishMaps.SizeFor(Players);
+            if (Map.Width != size || Map.Height != size)
             {
-                throw new ArgumentOutOfRangeException(nameof(Map), Map, "A skirmish's map size is set by its player count.");
+                throw new ArgumentOutOfRangeException(nameof(Map), Map, "A skirmish's map size is set by its map (and, for hand-made maps, its player count).");
             }
 
             if (Controllers.Count != Players)

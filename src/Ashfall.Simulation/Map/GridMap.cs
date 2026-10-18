@@ -13,6 +13,10 @@ public sealed class GridMap
     private readonly Terrain[] _terrain;
     private readonly int[] _cindrite;
     private readonly int[] _structure;
+    private readonly byte[] _height;
+
+    /// <summary>Highest height level a cell can have.</summary>
+    public const int MaxHeight = 7;
 
     public GridMap(int width, int height)
     {
@@ -24,6 +28,7 @@ public sealed class GridMap
         _terrain = new Terrain[width * height];
         _cindrite = new int[width * height];
         _structure = new int[width * height];
+        _height = new byte[width * height];
         Array.Fill(_structure, NoStructure);
     }
 
@@ -41,6 +46,19 @@ public sealed class GridMap
     public Terrain TerrainAt(Cell cell) => _terrain[IndexOf(cell)];
 
     public void SetTerrain(Cell cell, Terrain terrain) => _terrain[IndexOf(cell)] = terrain;
+
+    /// <summary>Height level 0–<see cref="MaxHeight"/>. Level changes are walled by Rock or joined by Ramp cells.</summary>
+    public int HeightAt(Cell cell) => InBounds(cell) ? _height[IndexOf(cell)] : 0;
+
+    public void SetHeight(Cell cell, int level)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(level);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(level, MaxHeight);
+        _height[IndexOf(cell)] = (byte)level;
+    }
+
+    /// <summary>Whether ground units can cross this terrain (ignoring structures).</summary>
+    public static bool IsWalkable(Terrain terrain) => terrain is Terrain.Clear or Terrain.Ramp or Terrain.Bridge;
 
     public int CindriteAt(Cell cell) => InBounds(cell) ? _cindrite[IndexOf(cell)] : 0;
 
@@ -80,12 +98,13 @@ public sealed class GridMap
 
     /// <summary>Ground units can stand on and move through this cell.</summary>
     public bool IsPassable(Cell cell) =>
-        InBounds(cell) && _terrain[IndexOf(cell)] == Terrain.Clear && _structure[IndexOf(cell)] == NoStructure;
+        InBounds(cell) && IsPassable(IndexOf(cell));
 
-    /// <summary>A structure footprint may cover this cell: passable and free of Cindrite.</summary>
-    public bool IsBuildable(Cell cell) => IsPassable(cell) && _cindrite[IndexOf(cell)] == 0;
+    /// <summary>A structure footprint may cover this cell: clear ground, no structure and no Cindrite.</summary>
+    public bool IsBuildable(Cell cell) =>
+        InBounds(cell) && _terrain[IndexOf(cell)] == Terrain.Clear && _structure[IndexOf(cell)] == NoStructure && _cindrite[IndexOf(cell)] == 0;
 
-    public bool IsPassable(int index) => _terrain[index] == Terrain.Clear && _structure[index] == NoStructure;
+    public bool IsPassable(int index) => IsWalkable(_terrain[index]) && _structure[index] == NoStructure;
 
     public int IndexOf(Cell cell)
     {
@@ -106,7 +125,8 @@ public sealed class GridMap
         hasher.Add(TotalCindrite);
         for (var i = 0; i < _terrain.Length; i++)
         {
-            hasher.Add(((long)_terrain[i] << 32) | (uint)_cindrite[i]);
+            // Height sits above the terrain bits, so maps without height hash exactly as before.
+            hasher.Add(((long)_height[i] << 40) | ((long)_terrain[i] << 32) | (uint)_cindrite[i]);
             hasher.Add(_structure[i]);
         }
     }

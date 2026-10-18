@@ -108,10 +108,7 @@ internal static class Minimap
             return default; // shroud: leave the black background
         }
 
-        var cell = new Cell(x, y);
-        var color = map.TerrainAt(cell) == Terrain.Rock ? Palette.RockTop
-            : map.CindriteAt(cell) > 0 ? Palette.Cindrite
-            : Palette.Ground;
+        var color = TerrainColors.Of(map, new Cell(x, y));
         return visibility < 1f ? Palette.Scale(color, 0.45f) : color;
     }
 }

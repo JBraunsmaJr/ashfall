@@ -8,7 +8,7 @@ namespace Ashfall.Architecture.Tests;
 
 /// <summary>
 /// Enforces the dependency direction from the GDD:
-/// Core ← Content ← Simulation ← Networking ← Session ← UI ← Client, with Session ← Headless and Rendering ← UI.
+/// Core ← Content ← Simulation ← (MapGen, Networking) ← Session ← UI ← Client, with Session ← Headless and Rendering ← UI.
 /// The simulation must never see rendering,
 /// audio, UI, networking or BRUTAL, so the headless runner exercises exactly what players run.
 /// </summary>
@@ -49,9 +49,16 @@ public class LayeringTests
     }
 
     [Fact]
-    public void Session_depends_only_on_core_content_simulation_and_networking()
+    public void Map_generation_depends_only_on_core_and_simulation()
     {
-        string[] expected = ["Ashfall.Content", "Ashfall.Core", "Ashfall.Networking", "Ashfall.Simulation"];
+        string[] expected = ["Ashfall.Core", "Ashfall.Simulation"];
+        Assert.Equal(expected, NonRuntimeReferences(typeof(Ashfall.MapGen.MapGenerator).Assembly));
+    }
+
+    [Fact]
+    public void Session_depends_only_on_core_content_simulation_map_generation_and_networking()
+    {
+        string[] expected = ["Ashfall.Content", "Ashfall.Core", "Ashfall.MapGen", "Ashfall.Networking", "Ashfall.Simulation"];
         Assert.Equal(expected, NonRuntimeReferences(Session));
     }
 

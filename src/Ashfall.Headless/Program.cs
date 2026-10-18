@@ -46,7 +46,7 @@ var spec = options.ToMatchSpec();
 Console.WriteLine(spec.Mode == MatchMode.Skirmish
     ? string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} tick-limit={options.Ticks} speed={options.Speed}")
+        $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}")
     : string.Create(
         CultureInfo.InvariantCulture,
         $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"));

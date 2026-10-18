@@ -60,12 +60,31 @@ public sealed class IsoCamera
     public Vector2 WorldToScreen(Vector2 ground) => WorldToScreen(new Vector3(ground, 0));
 
     /// <summary>The ground point (height 0) under a screen pixel.</summary>
-    public Vector2 ScreenToGround(Vector2 screen)
+    public Vector2 ScreenToGround(Vector2 screen) => ScreenToGround(screen, 0f);
+
+    /// <summary>The point at world height <paramref name="height"/> under a screen pixel.</summary>
+    public Vector2 ScreenToGround(Vector2 screen, float height)
     {
-        var offset = screen - ViewMiddle;
+        var offset = screen - ViewMiddle + new Vector2(0, height * HeightScale * Zoom);
         var a = offset.X / ((TileWidth / 2f) * Zoom);   // x - y
         var b = offset.Y / ((TileHeight / 2f) * Zoom);  // x + y
         return Center + new Vector2((a + b) / 2f, (b - a) / 2f);
+    }
+
+    /// <summary>
+    /// The terrain point under a screen pixel when the ground has height: refine the flat answer a few
+    /// times against <paramref name="groundHeight"/> (world z at a ground point).
+    /// </summary>
+    public Vector2 PickGround(Vector2 screen, Func<float, float, float> groundHeight)
+    {
+        ArgumentNullException.ThrowIfNull(groundHeight);
+        var point = ScreenToGround(screen);
+        for (var i = 0; i < 3; i++)
+        {
+            point = ScreenToGround(screen, groundHeight(point.X, point.Y));
+        }
+
+        return point;
     }
 
     public bool IsInViewport(Vector2 screen) =>

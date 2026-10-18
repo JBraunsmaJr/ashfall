@@ -237,7 +237,12 @@ public sealed class ScriptedSkirmishAi : ICommandSource
             }
         }
 
-        if (_idleAtHome.Count < _waveSize)
+        // All in: with no harvester and too little money to train anything, the army will never grow,
+        // so waiting for a full wave would stall the match forever. Send whatever is left.
+        var content = simulation.Content;
+        var broke = CountUnits(simulation, content.UnitIndex(BulwarkContent.Harvester)) == 0
+            && simulation.Players[_playerId].Credits < content.Unit(content.UnitIndex(BulwarkContent.Rifleman)).Cost;
+        if (_idleAtHome.Count < (broke ? 1 : _waveSize))
         {
             return;
         }
@@ -301,13 +306,18 @@ public sealed class ScriptedSkirmishAi : ICommandSource
     }
 
     // Spiral outward from home; keep a one-cell lane around every new structure so units can get out.
-    // The search runs in the base's own frame (axes pointing toward the map centre), so bases in opposite
-    // corners of a symmetric map are laid out as mirror images and neither side gets a better layout.
+    // The search runs in the base's own frame, so bases at symmetric starts are laid out identically
+    // relative to the terrain: a half turn for duels, and for three or four players the quarter turns
+    // that carry the top-left base onto each of the others.
     private bool TryFindSite(GameSimulation simulation, int structureType, Cell home, out Cell origin)
     {
         var definition = simulation.Content.Structure(structureType);
-        var flipX = home.X * 2 >= simulation.Map.Width;
-        var flipY = home.Y * 2 >= simulation.Map.Height;
+        var map = simulation.Map;
+        var flipX = home.X * 2 >= map.Width;
+        var flipY = home.Y * 2 >= map.Height;
+        var quarterTurns = simulation.Players.Count <= 2 || definition.Width != definition.Height
+            ? -1
+            : flipX ? (flipY ? 2 : 1) : (flipY ? 3 : 0);
         var reach = simulation.Content.Economy.BuildRadius + 4;
         for (var radius = 3; radius <= reach; radius++)
         {
@@ -320,10 +330,12 @@ public sealed class ScriptedSkirmishAi : ICommandSource
                         continue;
                     }
 
-                    var candidate = new Cell(
-                        LocalToOrigin(home.X, dx, definition.Width, flipX),
-                        LocalToOrigin(home.Y, dy, definition.Height, flipY));
-                    if (HasLane(simulation.Map, candidate, definition.Width, definition.Height)
+                    var candidate = quarterTurns >= 0
+                        ? Turned(home, dx, dy, definition.Width, quarterTurns)
+                        : new Cell(
+                            LocalToOrigin(home.X, dx, definition.Width, flipX),
+                            LocalToOrigin(home.Y, dy, definition.Height, flipY));
+                    if (HasLane(map, candidate, definition.Width, definition.Height)
                         && simulation.CheckPlacement(_playerId, structureType, candidate) == PlacementResult.Ok)
                     {
                         origin = candidate;
@@ -340,6 +352,20 @@ public sealed class ScriptedSkirmishAi : ICommandSource
     // Footprint origin along one axis for a footprint centred at home + offset, mirrored about home when flipped.
     private static int LocalToOrigin(int home, int offset, int size, bool flip) =>
         flip ? home - offset + (size / 2) - size + 1 : home + offset - (size / 2);
+
+    // The origin of a square footprint centred at home + (dx, dy), turned about home by quarter turns
+    // (x, y) -> (-y, x), worked in doubled coordinates so even-sized footprints turn exactly.
+    private static Cell Turned(Cell home, int dx, int dy, int size, int quarterTurns)
+    {
+        var x = (2 * (dx - (size / 2))) + size - 1;
+        var y = (2 * (dy - (size / 2))) + size - 1;
+        for (var i = 0; i < quarterTurns; i++)
+        {
+            (x, y) = (-y, x);
+        }
+
+        return new Cell(home.X + ((x - size + 1) / 2), home.Y + ((y - size + 1) / 2));
+    }
 
     private static bool HasLane(GridMap map, Cell origin, int width, int height)
     {

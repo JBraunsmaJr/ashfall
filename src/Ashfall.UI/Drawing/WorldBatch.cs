@@ -15,8 +15,17 @@ internal sealed class WorldBatch
     private readonly List<(float Depth, int Sequence, int Start, int Count)> _objects = [];
     private int _objectStart = -1;
     private float _objectDepth;
+    private float _lift;
 
     public IsoCamera Camera { get; set; } = null!;
+
+    /// <summary>Ground height (world z) at a world point, for lifting objects onto high ground; null means flat.</summary>
+    public Func<float, float, float>? Ground { get; set; }
+
+    /// <summary>Height added to every vertex of the current object (set by <see cref="Begin"/>).</summary>
+    public float Lift => _lift;
+
+    public float GroundAt(float x, float y) => Ground?.Invoke(x, y) ?? 0f;
 
     /// <summary>Fog visibility (0 shroud, 0.5 fog, 1 visible) at a world point; null means fully visible.</summary>
     public Func<float, float, float>? Visibility { get; set; }
@@ -28,11 +37,15 @@ internal sealed class WorldBatch
         _objectStart = -1;
     }
 
-    /// <summary>Starts an object; <paramref name="depth"/> is x + y of its ground position (larger is nearer the viewer).</summary>
-    public void Begin(float depth)
+    /// <summary>
+    /// Starts an object; <paramref name="depth"/> is x + y of its ground position (larger is nearer the
+    /// viewer) and <paramref name="lift"/> raises all of it, e.g. onto the ground height where it stands.
+    /// </summary>
+    public void Begin(float depth, float lift = 0f)
     {
         _objectStart = _quads.VertexCount;
         _objectDepth = depth;
+        _lift = lift;
     }
 
     public void End()
@@ -149,6 +162,7 @@ internal sealed class WorldBatch
     /// <summary>A screen-facing disc centred on a world point (fireballs, flashes), <paramref name="pixels"/> in radius at zoom 1.</summary>
     public void Billboard(Vector3 center, float pixels, LinearColor color, float emissive = 1f, QuadShape shape = QuadShape.Glow)
     {
+        center.Z += _lift;
         var middle = Camera.WorldToScreen(center);
         var radius = pixels * Camera.Zoom;
         var tint = new Vector4(color.R, color.G, color.B, color.A);
@@ -164,6 +178,9 @@ internal sealed class WorldBatch
     /// <summary>A screen-facing line between two world points, <paramref name="pixels"/> wide.</summary>
     public void Beam(Vector3 from, Vector3 to, float pixels, LinearColor color)
     {
+        // Each end sits on its own ground: shots go up and down hills.
+        from.Z += GroundAt(from.X, from.Y);
+        to.Z += GroundAt(to.X, to.Y);
         var a = Camera.WorldToScreen(from);
         var b = Camera.WorldToScreen(to);
         var direction = b - a;
@@ -185,7 +202,9 @@ internal sealed class WorldBatch
 
     private float Visible(Vector3 world) => Visibility?.Invoke(world.X, world.Y) ?? 1f;
 
-    private SceneVertex Vertex(Vector3 world, Vector3 normal, Vector4 color, Vector2 local, QuadShape shape, float emissive) => new()
+    private SceneVertex Vertex(Vector3 world, Vector3 normal, Vector4 color, Vector2 local, QuadShape shape, float emissive) => Lifted(world + new Vector3(0, 0, _lift), normal, color, local, shape, emissive);
+
+    private SceneVertex Lifted(Vector3 world, Vector3 normal, Vector4 color, Vector2 local, QuadShape shape, float emissive) => new()
     {
         Screen = Camera.WorldToScreen(world),
         World = world,

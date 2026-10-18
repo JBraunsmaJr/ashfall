@@ -6,7 +6,7 @@ namespace Ashfall.Session.Maps;
 /// The hand-made M1 duel map, 64×64 and rotationally symmetric (cell (x, y) mirrors to (63−x, 63−y)) so
 /// neither start is favoured. A rock ridge crosses the middle with a contested gap at the centre and a
 /// flank gap on each side; each base has its own Cindrite field and a richer field sits in the centre gap.
-/// Procedural maps replace this in M4.
+/// The default when no generated map is chosen, and the map the golden skirmish replay is played on.
 /// </summary>
 public static class DuelMap
 {

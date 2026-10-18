@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using Ashfall.MapGen;
 using Ashfall.Networking.Protocol;
 using Ashfall.Networking.Transport;
 using Ashfall.Session;
@@ -45,19 +46,19 @@ internal sealed class LanParty : IDisposable
 
     public NetworkSession Host => _sessions[0];
 
-    public static LanParty Simulated(int humans, int ais = 0, ulong seed = 11, double loss = 0, int? inputDelay = null, string? dumps = null)
+    public static LanParty Simulated(int humans, int ais = 0, ulong seed = 11, double loss = 0, int? inputDelay = null, string? dumps = null, MapSettings? map = null)
     {
         var clock = new SteppedClock();
         var network = new SimulatedNetwork(clock, seed: (int)seed) { Loss = loss };
         var party = new LanParty(clock, network);
-        party.Open(humans, ais, seed, inputDelay, dumps, () => network.CreateSocket());
+        party.Open(humans, ais, seed, inputDelay, dumps, () => network.CreateSocket(), map);
         return party;
     }
 
     public static LanParty Udp(int humans, int ais = 0, ulong seed = 11)
     {
         var party = new LanParty(null, null);
-        party.Open(humans, ais, seed, null, null, () => new UdpDatagramSocket(0, IPAddress.Loopback));
+        party.Open(humans, ais, seed, null, null, () => new UdpDatagramSocket(0, IPAddress.Loopback), null);
         return party;
     }
 
@@ -129,9 +130,9 @@ internal sealed class LanParty : IDisposable
         }
     }
 
-    private void Open(int humans, int ais, ulong seed, int? inputDelay, string? dumps, Func<IDatagramSocket> socket)
+    private void Open(int humans, int ais, ulong seed, int? inputDelay, string? dumps, Func<IDatagramSocket> socket, MapSettings? map)
     {
-        var settings = HostSettings.For(humans, ais, seed) with { InputDelay = inputDelay };
+        var settings = HostSettings.For(humans, ais, seed, map) with { InputDelay = inputDelay };
         var host = NetworkSession.Host(Transport(socket()), NetworkIdentity.CreateRandom("HOST"), settings, Options(dumps));
         _sessions.Add(host);
         var hostAddress = Clock is null ? new IPEndPoint(IPAddress.Loopback, host.LocalEndPoint.Port) : host.LocalEndPoint;

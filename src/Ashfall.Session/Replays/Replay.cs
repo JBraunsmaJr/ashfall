@@ -15,7 +15,7 @@ public sealed class Replay
 {
     private static ReadOnlySpan<byte> Magic => "ASHFALL-REPLAY\0\0"u8;
 
-    private const int FormatVersion = 1;
+    private const int FormatVersion = 2;
 
     public Replay(MatchSpec spec, ulong contentHash, IReadOnlyList<(long Tick, Command[] Commands)> commands, long finalTick, ulong finalHash)
     {
@@ -126,13 +126,13 @@ public sealed class Replay
 
         var reader = new PacketReader(data[Magic.Length..]);
         var version = reader.ReadInt32();
-        if (version != FormatVersion)
+        if (version is < 1 or > FormatVersion)
         {
-            throw new ProtocolException($"Replay format {version} is not supported (this build reads {FormatVersion}).");
+            throw new ProtocolException($"Replay format {version} is not supported (this build reads 1 to {FormatVersion}).");
         }
 
         var contentHash = reader.ReadUInt64();
-        var spec = MatchSpecCodec.Read(reader);
+        var spec = MatchSpecCodec.Read(reader, version);
         var finalTick = reader.ReadInt64();
         var finalHash = reader.ReadUInt64();
         var entries = new (long, Command[])[reader.ReadCount(int.MaxValue / 64)];

@@ -1,8 +1,9 @@
-﻿using Ashfall.Networking.Protocol;
+﻿using Ashfall.MapGen;
+using Ashfall.Networking.Protocol;
 
 namespace Ashfall.Session.Network;
 
-/// <summary>What the host chooses before anyone joins: the seed and the slot layout (the host takes slot 0).</summary>
+/// <summary>What the host chooses before anyone joins: the seed, the map and the slot layout (the host takes slot 0).</summary>
 public sealed record HostSettings
 {
     public ulong Seed { get; init; } = ProvingGround.DefaultSeed;
@@ -16,9 +17,13 @@ public sealed record HostSettings
     /// <summary>Fixed input delay in ticks; null measures the lobby's round trips and picks 2–6.</summary>
     public int? InputDelay { get; init; }
 
-    public static HostSettings For(int humans, int ais, ulong seed) => new()
+    /// <summary>The generated map to play, or null for the hand-made duel/quad map.</summary>
+    public MapSettings? Map { get; init; }
+
+    public static HostSettings For(int humans, int ais, ulong seed, MapSettings? map = null) => new()
     {
         Seed = seed,
+        Map = map,
         OtherSlots = [.. Enumerable.Repeat(SlotKind.Open, humans - 1), .. Enumerable.Repeat(SlotKind.Ai, ais)],
     };
 }

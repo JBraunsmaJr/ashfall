@@ -24,6 +24,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
     private readonly List<Command> _recorded = [];
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>The skirmish map (hand-made or generated); null for the proving ground.</summary>
+    public MatchMap? Map { get; }
+
     private HeadlessMatch(MatchSpec spec, GameSpeed speed, TimeProvider timeProvider)
     {
         Spec = spec;
@@ -31,8 +34,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
         Clock = new SessionClock(speed, timeProvider);
         if (spec.Mode == MatchMode.Skirmish)
         {
-            Simulation = CreateSkirmish(spec, _sources, out var localPlayer);
+            Simulation = CreateSkirmish(spec, _sources, out var localPlayer, out var map);
             LocalPlayer = localPlayer;
+            Map = map;
             var remote = Enumerable.Range(0, spec.Players).Where(seat => spec.Controllers[seat] == PlayerController.Remote).ToArray();
             if (remote.Length > 0)
             {
@@ -187,7 +191,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
     public Task<MatchResult> RunToCompletionAsync(long maxTicks, CancellationToken cancellationToken = default) =>
         RunUntilAsync(static match => match.IsOver, maxTicks, cancellationToken);
 
-    private static GameSimulation CreateSkirmish(MatchSpec spec, List<ICommandSource> sources, out LocalOrders? localPlayer)
+    private static GameSimulation CreateSkirmish(MatchSpec spec, List<ICommandSource> sources, out LocalOrders? localPlayer, out MatchMap matchMap)
     {
         localPlayer = null;
         var content = GameContent.Standard;
@@ -197,11 +201,12 @@ public sealed class HeadlessMatch : IAsyncDisposable
             players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId);
         }
 
-        var simulation = new GameSimulation(spec.Seed, SkirmishMaps.Create(spec.Players), content, players);
+        var map = matchMap = MatchMap.Create(spec.GeneratedMap, spec.Players);
+        var simulation = new GameSimulation(spec.Seed, map.Grid, content, players);
         var yard = content.StructureIndex(BulwarkContent.ConstructionYard);
         for (var player = 0; player < players.Length; player++)
         {
-            simulation.PlaceStructure(player, yard, SkirmishMaps.StartOrigin(spec.Players, player));
+            simulation.PlaceStructure(player, yard, map.StartOrigins[player]);
             switch (spec.Controllers[player])
             {
                 case PlayerController.ScriptedAi:

@@ -32,6 +32,8 @@ internal sealed class Effects
             var t = (float)((now - effect.Start) / effect.Duration);
             var fade = 1f - t;
             var depth = effect.From.X + effect.From.Y + 0.5f;
+            var lift = batch.GroundAt(effect.From.X, effect.From.Y);
+            var raised = effect.From + new Vector3(0, 0, lift);
             switch (effect.Kind)
             {
                 case EffectKind.Tracer:
@@ -41,27 +43,27 @@ internal sealed class Effects
                     break;
 
                 case EffectKind.Flash:
-                    batch.Begin(depth);
+                    batch.Begin(depth, lift);
                     batch.Billboard(effect.From, 7f * effect.Size * (0.5f + fade), Palette.WithAlpha(Palette.CindriteHot, fade));
                     batch.End();
-                    scene.AddLight(new PointLight(effect.From + new Vector3(0, 0, 0.3f), 2.5f * effect.Size, Palette.Muzzle, 0.9f * fade));
+                    scene.AddLight(new PointLight(raised + new Vector3(0, 0, 0.3f), 2.5f * effect.Size, Palette.Muzzle, 0.9f * fade));
                     break;
 
                 case EffectKind.Explosion:
                     // Scorch on the ground, a fireball that swells and cools, then a puff of smoke.
                     var pixels = 18f * effect.Size;
-                    batch.Begin(depth + effect.Size);
+                    batch.Begin(depth + effect.Size, lift);
                     batch.Disc(new Vector2(effect.From.X, effect.From.Y), effect.Size * 0.8f, 0.015f, Palette.WithAlpha(new LinearColor(0.03f, 0.025f, 0.02f), 0.55f * fade));
                     batch.Billboard(effect.From + new Vector3(0, 0, 0.2f + (t * 0.6f)), pixels * (0.6f + t), Palette.WithAlpha(new LinearColor(0.08f, 0.07f, 0.06f), 0.5f * fade), emissive: 0f);
                     batch.Billboard(effect.From + new Vector3(0, 0, 0.25f), pixels * (0.5f + (t * 0.5f)), Palette.WithAlpha(Palette.Mix(Palette.CindriteHot, Palette.Explosion, t), fade));
                     batch.End();
-                    scene.AddLight(new PointLight(effect.From + new Vector3(0, 0, 0.8f), 3f + (effect.Size * 3f), Palette.Explosion, 1.4f * fade));
+                    scene.AddLight(new PointLight(raised + new Vector3(0, 0, 0.8f), 3f + (effect.Size * 3f), Palette.Explosion, 1.4f * fade));
                     break;
 
                 case EffectKind.MoveMarker:
                 case EffectKind.AttackMarker:
                     var color = effect.Kind == EffectKind.MoveMarker ? Palette.Selection : Palette.HealthLow;
-                    batch.Begin(depth - 1f);
+                    batch.Begin(depth - 1f, lift);
                     batch.Disc(new Vector2(effect.From.X, effect.From.Y), 0.5f * (1f - (t * 0.6f)), 0.02f, Palette.WithAlpha(color, fade), emissive: 1f, shape: QuadShape.Ring);
                     batch.End();
                     break;

@@ -1,4 +1,5 @@
 ﻿using Ashfall.Core;
+using Ashfall.MapGen;
 using Ashfall.Networking.Wire;
 using Ashfall.Simulation;
 
@@ -32,9 +33,13 @@ public static class MatchSpecCodec
         {
             writer.WriteInt32(team);
         }
+
+        // Format 2: the generated map's code, empty for a hand-made map.
+        writer.WriteString(spec.GeneratedMap?.ToCode() ?? string.Empty);
     }
 
-    public static MatchSpec Read(PacketReader reader)
+    /// <param name="formatVersion">The replay format: 1 had no map code (always a hand-made map).</param>
+    public static MatchSpec Read(PacketReader reader, int formatVersion = 2)
     {
         ArgumentNullException.ThrowIfNull(reader);
         var seed = reader.ReadUInt64();
@@ -58,6 +63,18 @@ public static class MatchSpecCodec
             teams[i] = reader.ReadInt32();
         }
 
+        MapSettings? generated = null;
+        if (formatVersion >= 2)
+        {
+            var code = reader.ReadString();
+            if (code.Length > 0)
+            {
+                generated = MapSettings.TryParseCode(code, out var settings)
+                    ? settings
+                    : throw new ProtocolException($"Unknown map code {code}.");
+            }
+        }
+
         var spec = new MatchSpec
         {
             Seed = seed,
@@ -71,6 +88,7 @@ public static class MatchSpecCodec
             InputDelay = delay,
             Controllers = controllers,
             Teams = teams,
+            GeneratedMap = generated,
         };
         try
         {

@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ashfall-mappreview</AssemblyName>
+    <Description>Generates maps in bulk across seeds, archetypes, player counts and slider sweeps; reports validation and fairness statistics and renders contact sheets. CI runs it as the M4 exit gate.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ashfall.MapGen\Ashfall.MapGen.csproj" />
+  </ItemGroup>
+
+</Project>

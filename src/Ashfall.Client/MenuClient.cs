@@ -46,6 +46,7 @@ internal static class MenuClient
                     {
                         Seed = settings.Seed,
                         Opponent = settings.IdleOpponent ? PlayerController.IdleAi : PlayerController.ScriptedAi,
+                        GeneratedMap = settings.Map,
                     }).ConfigureAwait(false);
                     break;
 
@@ -58,6 +59,7 @@ internal static class MenuClient
                         Port = settings.Port,
                         Name = settings.Name,
                         Seed = options.SeedGiven ? options.Seed : (ulong)Random.Shared.NextInt64(1, 1_000_000_000),
+                        GeneratedMap = settings.Map,
                     }).Message;
                     break;
 

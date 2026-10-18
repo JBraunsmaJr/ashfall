@@ -6,6 +6,7 @@ using Ashfall.Rendering.Scene;
 using Ashfall.Session.Network;
 using Ashfall.UI.Drawing;
 using Ashfall.UI.Input;
+using Ashfall.UI.Menu;
 using Ashfall.UI.Text;
 
 namespace Ashfall.UI;
@@ -25,6 +26,9 @@ public sealed class LobbyScreen(NetworkSession session)
     public bool ExitRequested { get; private set; }
 
     public NetworkSession Session { get; } = session;
+
+    /// <summary>The lobby's map, generated locally from the host's map code (exactly what the match will use).</summary>
+    public MapPreview Preview { get; init; } = new();
 
     public void Update(InputState input, Vector2 framebuffer)
     {
@@ -71,12 +75,31 @@ public sealed class LobbyScreen(NetworkSession session)
         var lobby = Session.Lobby;
         if (lobby is not null)
         {
+            // The map: its name and code, and a preview generated here from the code.
+            var map = NetworkSession.MapOf(lobby);
+            var players = Math.Max(2, lobby.Seats().Count());
+            Preview.Request(map, players);
+            var previewSize = Math.Min(220 * scale, panelWidth - (540 * scale));
+            var tableWidth = panelWidth - (32 * scale);
+            if (previewSize >= 80 * scale)
+            {
+                tableWidth -= previewSize + (16 * scale);
+                var previewX = left + panelWidth - (16 * scale) - previewSize;
+                Preview.Draw(canvas, previewX, top + (64 * scale), previewSize, 1.5f * scale);
+                var name = map is null ? (players <= 2 ? "HAND-MADE DUEL MAP" : "HAND-MADE QUAD MAP") : map.Archetype.Name.ToUpperInvariant();
+                canvas.Text(previewX, top + (70 * scale) + previewSize, name, 1.5f * scale, Palette.Text);
+                if (map is not null)
+                {
+                    canvas.Text(previewX, top + (84 * scale) + previewSize, map.ToCode(), 1.5f * scale, Palette.TextDim);
+                }
+            }
+
             var rowY = top + (64 * scale);
             canvas.Text(left + (16 * scale), rowY, "SLOT  PLAYER            TEAM   STATUS", 2 * scale, Palette.TextDim);
             rowY += 22 * scale;
             for (var slot = 0; slot < lobby.Slots.Count; slot++)
             {
-                DrawSlot(canvas, lobby, slot, left + (16 * scale), rowY, panelWidth - (32 * scale));
+                DrawSlot(canvas, lobby, slot, left + (16 * scale), rowY, tableWidth);
                 rowY += 30 * scale;
             }
         }

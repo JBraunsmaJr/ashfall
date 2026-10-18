@@ -27,7 +27,7 @@ public enum MessageType : byte
 public abstract record Message
 {
     /// <summary>Bumped whenever the wire format changes; peers with different versions cannot play together.</summary>
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
 
     public abstract MessageType Type { get; }
 

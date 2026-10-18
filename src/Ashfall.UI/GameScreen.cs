@@ -201,7 +201,8 @@ public sealed class GameScreen
 
         _batch.Camera = Camera;
         _batch.Visibility = _fog.Enabled ? _fog.Sample : null;
-        _painter.PaintTerrain(Simulation, Camera);
+        _batch.Ground = (x, y) => WorldPainter.GroundHeight(Simulation.Map, x, y);
+        _painter.PaintTerrain(Simulation, Camera, time);
         _painter.PaintStructures(Simulation, Player, _selectedSet, scene);
         _painter.PaintUnits(Simulation, Player, _selectedSet, Math.Clamp(alpha, 0f, 1f));
         if (_placing >= 0 && !_sidebar.Layout.Contains(_lastMouse))
@@ -479,7 +480,7 @@ public sealed class GameScreen
         {
             if (input.WasPressed(MouseButton.Left))
             {
-                IssueMove(Camera.ScreenToGround(input.Mouse), attackMove: true);
+                IssueMove(PickGround(input.Mouse), attackMove: true);
                 _attackMove = input.Shift;
             }
             else if (input.WasPressed(MouseButton.Right))
@@ -517,10 +518,15 @@ public sealed class GameScreen
             }
             else
             {
-                IssueMove(Camera.ScreenToGround(input.Mouse), attackMove: false);
+                IssueMove(PickGround(input.Mouse), attackMove: false);
             }
         }
     }
+
+    private float GroundHeight(Vector2 point) => WorldPainter.GroundHeight(Simulation.Map, point.X, point.Y);
+
+    // The terrain point under the cursor, allowing for high ground.
+    private Vector2 PickGround(Vector2 mouse) => Camera.PickGround(mouse, (x, y) => WorldPainter.GroundHeight(Simulation.Map, x, y));
 
     private void IssueAttack(Entity target)
     {
@@ -604,7 +610,7 @@ public sealed class GameScreen
 
             var entity = world.EntityAt(index);
             var position = _motion.PositionOf(entity, MotionTracker.ToVector(world.Store<Position>().Get(index).Value), 1f);
-            var screen = Camera.WorldToScreen(new Vector3(position, 0.2f));
+            var screen = Camera.WorldToScreen(new Vector3(position, 0.2f + GroundHeight(position)));
             if (screen.X >= min.X && screen.X <= max.X && screen.Y >= min.Y && screen.Y <= max.Y)
             {
                 _scratch.Add(entity);
@@ -638,7 +644,7 @@ public sealed class GameScreen
 
             var definition = Simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType);
             var radius = (definition.IsHarvester || definition.Id == BulwarkContent.Warden ? 20f : 12f) * Camera.Zoom;
-            var distance = Vector2.Distance(Camera.WorldToScreen(new Vector3(position, 0.2f)), mouse);
+            var distance = Vector2.Distance(Camera.WorldToScreen(new Vector3(position, 0.2f + GroundHeight(position))), mouse);
             if (distance < radius && distance < bestDistance)
             {
                 best = entity;
@@ -651,7 +657,7 @@ public sealed class GameScreen
             return best;
         }
 
-        var ground = Camera.ScreenToGround(mouse);
+        var ground = PickGround(mouse);
         var cell = new Cell((int)MathF.Floor(ground.X), (int)MathF.Floor(ground.Y));
         var structureIndex = Simulation.Map.StructureAt(cell);
         if (structureIndex < 0 || _fog.At(cell.X, cell.Y) <= 0f)
@@ -692,7 +698,7 @@ public sealed class GameScreen
     private Cell PlacementOrigin(Vector2 mouse)
     {
         var definition = Simulation.Content.Structure(_placing);
-        var ground = Camera.ScreenToGround(mouse);
+        var ground = PickGround(mouse);
         return new Cell((int)MathF.Floor(ground.X - (definition.Width / 2f) + 0.5f), (int)MathF.Floor(ground.Y - (definition.Height / 2f) + 0.5f));
     }
 
@@ -722,7 +728,8 @@ public sealed class GameScreen
                     continue;
                 }
 
-                anchor = new Vector3(info.Origin.X + (definition.Width / 2f), info.Origin.Y + (definition.Height / 2f), WorldPainter.StructureHeight(definition.Role) + 0.9f);
+                var middle = new Vector2(info.Origin.X + (definition.Width / 2f), info.Origin.Y + (definition.Height / 2f));
+                anchor = new Vector3(middle, WorldPainter.StructureHeight(definition.Role) + 0.9f + GroundHeight(middle));
                 width = 16f * definition.Width;
             }
             else
@@ -734,7 +741,7 @@ public sealed class GameScreen
                 }
 
                 var definition = Simulation.Content.Unit(world.Get<UnitInfo>(entity).UnitType);
-                anchor = new Vector3(position, definition.IsHarvester || definition.Id == BulwarkContent.Warden ? 0.8f : 0.7f);
+                anchor = new Vector3(position, (definition.IsHarvester || definition.Id == BulwarkContent.Warden ? 0.8f : 0.7f) + GroundHeight(position));
                 width = definition.IsHarvester || definition.Id == BulwarkContent.Warden ? 30f : 18f;
             }
 

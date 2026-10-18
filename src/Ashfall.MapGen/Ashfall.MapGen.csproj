@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Procedural map generation: archetype rule-sets driven by lobby sliders, a layout graph embedded with exact rotational symmetry, heightfield, water, resources and dressing, then validation and fairness scoring. Pure and deterministic: every peer generates the same map from the same settings.</Description>
+    <AshfallDeterministic>true</AshfallDeterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
+    <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
+  </ItemGroup>
+
+</Project>

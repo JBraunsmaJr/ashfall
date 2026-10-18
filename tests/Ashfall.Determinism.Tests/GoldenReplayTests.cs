@@ -10,19 +10,41 @@ namespace Ashfall.Determinism.Tests;
 /// <list type="bullet">
 /// <item><b>proving-ground</b> (M0): 200 wandering units on an open map for two minutes.</item>
 /// <item><b>skirmish</b> (M1): the default 1v1 Bulwark duel between scripted AIs, played to victory.</item>
+/// <item><b>generated</b> (M4): a 2v2 between scripted AIs on a generated Riverlands map, played to victory.</item>
 /// </list>
+/// <c>maps.hashes</c> pins the generator itself: map code, player count and the grid's hash.
 /// </summary>
 /// <remarks>
 /// If a change is meant to alter simulation behaviour, regenerate the golden files with:
 /// <code>
 /// dotnet run --project src/Ashfall.Headless -c Release -- --hash-out tests/Ashfall.Determinism.Tests/Golden/proving-ground.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/proving-ground.checkpoints
 /// dotnet run --project src/Ashfall.Headless -c Release -- --mode skirmish --hash-out tests/Ashfall.Determinism.Tests/Golden/skirmish.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/skirmish.checkpoints
+/// dotnet run --project src/Ashfall.Headless -c Release -- --mode skirmish --players 4 --teams 0,1,0,1 --map-code RIV-20000Z-N5NJHJ-TM6XWS --hash-out tests/Ashfall.Determinism.Tests/Golden/generated.hash --checkpoints-out tests/Ashfall.Determinism.Tests/Golden/generated.checkpoints
+/// dotnet run --project tools/Ashfall.Tools.MapPreview -c Release -- --code CODE --players N   (prints the hash for maps.hashes)
 /// </code>
 /// and say why in the commit message. Never regenerate them to make an unexplained failure go away.
 /// </remarks>
 public class GoldenReplayTests
 {
-    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish" };
+    /// <summary>The generated-map reference match: a 2v2 on this Riverlands map.</summary>
+    public const string GeneratedMapCode = "RIV-20000Z-N5NJHJ-TM6XWS";
+
+    public static TheoryData<string> Replays => new() { "proving-ground", "skirmish", "generated" };
+
+    [Fact]
+    public void Generated_maps_match_their_golden_hashes()
+    {
+        var lines = File.ReadAllLines(GoldenPath("maps.hashes")).Select(Clean).Where(line => line.Length > 0).ToList();
+        Assert.NotEmpty(lines);
+        foreach (var line in lines)
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            Assert.True(Ashfall.MapGen.MapSettings.TryParseCode(parts[0], out var settings), parts[0]);
+            var players = int.Parse(parts[1], CultureInfo.InvariantCulture);
+            var hash = Ashfall.MapGen.MapGenerator.Generate(settings, players).Hash;
+            Assert.Equal(parts[2], StateHasher.Format(hash));
+        }
+    }
 
     [Theory]
     [MemberData(nameof(Replays))]
@@ -65,6 +87,14 @@ public class GoldenReplayTests
     private static async Task<MatchResult> RunAsync(string replay)
     {
         var cancellation = TestContext.Current.CancellationToken;
+        if (replay == "generated")
+        {
+            Assert.True(Ashfall.MapGen.MapSettings.TryParseCode(GeneratedMapCode, out var map));
+            var spec = MatchSpec.Skirmish(ProvingGround.DefaultSeed, 4).WithTeams(0, 1, 0, 1).WithGeneratedMap(map);
+            await using var generated = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled);
+            return await generated.RunToCompletionAsync(MatchSpec.SkirmishTickLimit, cancellation);
+        }
+
         if (replay == "skirmish")
         {
             await using var skirmish = await HeadlessMatch.StartAsync(MatchSpec.Skirmish(ProvingGround.DefaultSeed), GameSpeed.Unthrottled);

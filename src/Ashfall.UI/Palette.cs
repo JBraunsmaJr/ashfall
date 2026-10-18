@@ -10,6 +10,14 @@ public static class Palette
     public static readonly LinearColor GroundDark = LinearColor.FromSrgb(86, 78, 68);
     public static readonly LinearColor Rock = LinearColor.FromSrgb(72, 72, 80);
     public static readonly LinearColor RockTop = LinearColor.FromSrgb(98, 98, 106);
+    public static readonly LinearColor Water = LinearColor.FromSrgb(38, 74, 112);
+    public static readonly LinearColor WaterLight = LinearColor.FromSrgb(70, 118, 160);
+    public static readonly LinearColor Bridge = LinearColor.FromSrgb(122, 96, 66);
+    public static readonly LinearColor BridgeTop = LinearColor.FromSrgb(150, 120, 84);
+    public static readonly LinearColor Ramp = LinearColor.FromSrgb(124, 112, 92);
+    public static readonly LinearColor Trunk = LinearColor.FromSrgb(74, 56, 40);
+    public static readonly LinearColor Leaves = LinearColor.FromSrgb(52, 96, 50);
+    public static readonly LinearColor LeavesTop = LinearColor.FromSrgb(72, 124, 64);
     public static readonly LinearColor CindriteGround = LinearColor.FromSrgb(96, 64, 44);
     public static readonly LinearColor Cindrite = LinearColor.FromSrgb(255, 128, 36);
     public static readonly LinearColor CindriteHot = LinearColor.FromSrgb(255, 196, 92);

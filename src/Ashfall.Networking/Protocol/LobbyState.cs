@@ -8,6 +8,9 @@ public sealed record LobbyState(int Revision, ulong Seed, ulong ContentHash, IRe
 {
     public const int MaxSlots = 8;
 
+    /// <summary>The generated map's code (peers generate it locally), or empty for the hand-made map.</summary>
+    public string MapCode { get; init; } = string.Empty;
+
     /// <summary>Seats that will play: humans and AIs, in slot order (open and closed slots are left out).</summary>
     public IEnumerable<(int Slot, LobbySlot Seat)> Seats() =>
         Slots.Select((slot, index) => (index, slot)).Where(pair => pair.slot.Kind is SlotKind.Human or SlotKind.Ai);
@@ -63,6 +66,8 @@ public sealed record LobbyState(int Revision, ulong Seed, ulong ContentHash, IRe
         {
             slot.Write(writer);
         }
+
+        writer.WriteString(MapCode);
     }
 
     public static LobbyState Read(PacketReader reader)
@@ -77,6 +82,6 @@ public sealed record LobbyState(int Revision, ulong Seed, ulong ContentHash, IRe
             slots[i] = LobbySlot.Read(reader);
         }
 
-        return new LobbyState(revision, seed, contentHash, slots);
+        return new LobbyState(revision, seed, contentHash, slots) { MapCode = reader.ReadString() };
     }
 }

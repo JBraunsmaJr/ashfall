@@ -57,6 +57,21 @@ jobs:
           --hash-out skirmish-${{ runner.os }}.hash
           --checkpoints-out skirmish-${{ runner.os }}.checkpoints
 
+      - name: Skirmish on a generated map (2v2 Crossroads, twice, must match)
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode skirmish --players 4 --teams 0,1,0,1
+          --archetype crossroads --map-seed 7 --slider elevation=60
+          --repeat 2
+          --hash-out generated-${{ runner.os }}.hash
+          --checkpoints-out generated-${{ runner.os }}.checkpoints
+
+      - name: Map generation gate (M4) - slider sweeps on every archetype, all valid and fair
+        run: >
+          dotnet run --project tools/Ashfall.Tools.MapPreview -c Release --no-build --
+          --seeds 40 --sweep --min-first-try 90 --verbose
+          --sheet mapgen-${{ runner.os }}.png
+
       - name: LAN match (M3 gate) - four separate processes over UDP, no desyncs, replay verified
         shell: bash
         run: |
@@ -70,7 +85,14 @@ jobs:
           path: |
             proving-ground-${{ runner.os }}.*
             skirmish-${{ runner.os }}.*
+            generated-${{ runner.os }}.*
             lan-${{ runner.os }}.hash
+
+      - name: Upload map generation contact sheet
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapgen-${{ runner.os }}
+          path: mapgen-${{ runner.os }}.png
 
       - name: Upload LAN match logs and replay
         if: always()
@@ -154,7 +176,7 @@ jobs:
           path: render-*.png
 
   cross-platform-determinism:
-    # M0/M1 exit gates: the same replays must produce the same hashes on Windows and Linux.
+    # M0/M1/M4 exit gates: the same matches (hand-made and generated maps) must produce the same hashes on Windows and Linux.
     name: Cross-platform determinism
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -168,7 +190,7 @@ jobs:
       - name: Compare Linux and Windows hashes
         run: |
           status=0
-          for replay in proving-ground skirmish; do
+          for replay in proving-ground skirmish generated; do
             echo "## ${replay} state hashes" >> "$GITHUB_STEP_SUMMARY"
             echo "Linux:   $(cat ${replay}-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
             echo "Windows: $(cat ${replay}-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"

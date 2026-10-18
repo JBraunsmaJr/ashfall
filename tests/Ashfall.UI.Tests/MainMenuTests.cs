@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using Ashfall.Rendering.Scene;
 using Ashfall.UI.Input;
+using Ashfall.MapGen;
 using Ashfall.UI.Menu;
 
 namespace Ashfall.UI.Tests;
@@ -124,6 +125,54 @@ public class MainMenuTests
     }
 
     [Fact]
+    public void The_map_is_picked_with_archetype_buttons_slider_bars_and_pasted_codes()
+    {
+        var menu = new MenuDriver(new MenuSettings { Map = null });
+        menu.Click("SKIRMISH");
+        Assert.Null(menu.Screen.Map);
+        Assert.Equal("Duel", menu.Screen.Preview.Map?.Name);
+
+        menu.Click("RIVERLANDS");
+        Assert.Equal(MapArchetypes.Riverlands, menu.Screen.Map?.Archetype);
+        Assert.Equal(MapArchetypes.Riverlands, menu.Screen.Preview.Map?.Generated?.Requested.Archetype);
+
+        // Clicking the middle of a bar sets its slider to about half; the preview follows.
+        menu.ClickBar("ELEVATION", 0.5f);
+        Assert.InRange(menu.Screen.Map![MapSlider.Elevation], 48, 52);
+        menu.ClickBar("SIZE", 1f);
+        Assert.Equal(100, menu.Screen.Map![MapSlider.Size]);
+        Assert.Equal(128, menu.Screen.Preview.Map?.Grid.Width);
+
+        // Pasting a map code into the code box switches to exactly that map.
+        var shared = new MapSettings(MapArchetypes.Crossroads, 777).With(MapSlider.Water, 90);
+        menu.Click("CODE");
+        for (var i = 0; i < 30; i++)
+        {
+            menu.Press(Key.Backspace);
+        }
+
+        menu.Type(shared.ToCode());
+        Assert.Equal(shared, menu.Screen.Map);
+
+        menu.Click("START");
+        Assert.Equal(shared, menu.Screen.Choice?.Settings.Map);
+        Assert.Equal(shared, MenuSettings.Parse(menu.Screen.Choice!.Settings.Serialize()).Map);
+    }
+
+    [Fact]
+    public void Hosting_a_hand_made_map_and_remembering_it()
+    {
+        var menu = new MenuDriver(new MenuSettings());
+        menu.Click("HOST GAME");
+        menu.Click("HAND-MADE");
+        menu.Click("+", 1); // an AI: three players, so the preview shows the quad map
+        Assert.Equal("Quad", menu.Screen.Preview.Map?.Name);
+        menu.Click("HOST");
+        Assert.Null(menu.Screen.Choice?.Settings.Map);
+        Assert.Null(MenuSettings.Parse(menu.Screen.Choice!.Settings.Serialize()).Map);
+    }
+
+    [Fact]
     public void A_failure_message_shows_on_the_main_page_until_the_player_moves_on()
     {
         var menu = new MenuDriver(new MenuSettings(), "Could not reach the host.");
@@ -226,7 +275,7 @@ public class MainMenuTests
 
         public MenuDriver(MenuSettings settings, string? message = null)
         {
-            Screen = new MainMenuScreen(settings, message);
+            Screen = new MainMenuScreen(settings, message) { Preview = new MapPreview { Synchronous = true } };
             Frame();
         }
 
@@ -256,6 +305,17 @@ public class MainMenuTests
             Frame();
         }
 
+        public void ClickBar(string label, float fraction)
+        {
+            var target = Target(label, 0);
+            var left = target.Center.X - (target.Size.X / 2);
+            _input.Mouse = new Vector2(left + (Math.Min(fraction, 0.999f) * target.Size.X), target.Center.Y);
+            _input.SetButton(MouseButton.Left, true);
+            Frame();
+            _input.SetButton(MouseButton.Left, false);
+            Frame();
+        }
+
         public void Type(string text)
         {
             _input.Type(text);
@@ -270,7 +330,7 @@ public class MainMenuTests
             Frame();
         }
 
-        private (string Label, Vector2 Center, bool Enabled) Target(string label, int index)
+        private (string Label, Vector2 Center, Vector2 Size, bool Enabled) Target(string label, int index)
         {
             var matches = Screen.Targets.Where(t => t.Label == label).ToList();
             Assert.True(matches.Count > index, $"No '{label}' #{index} on the {Screen.CurrentPage} page: {string.Join(", ", Screen.Targets.Select(t => t.Label))}");

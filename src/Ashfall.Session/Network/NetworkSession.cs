@@ -2,6 +2,7 @@
 using System.Net;
 using Ashfall.Content;
 using Ashfall.Core;
+using Ashfall.MapGen;
 using Ashfall.Networking.Protocol;
 using Ashfall.Networking.Transport;
 using Ashfall.Networking.Wire;
@@ -133,7 +134,7 @@ public sealed class NetworkSession : IDisposable
                 };
         }
 
-        session.Lobby = new LobbyState(1, settings.Seed, session.ContentHash, slots);
+        session.Lobby = new LobbyState(1, settings.Seed, session.ContentHash, slots) { MapCode = settings.Map?.ToCode() ?? string.Empty };
         session.LocalSlot = 0;
         session.State = SessionState.Lobby;
         session.Note($"Hosting on port {transport.LocalEndPoint.Port}.");
@@ -271,7 +272,7 @@ public sealed class NetworkSession : IDisposable
 
         var lobby = Lobby!;
         var delay = _hostSettings!.InputDelay ?? ChooseInputDelay();
-        var start = new StartMessage(lobby, delay, MapHash(lobby.Seats().Count()));
+        var start = new StartMessage(lobby, delay, MatchMap.HashOf(MapOf(lobby), lobby.Seats().Count()));
         foreach (var link in _links.Values.Where(link => link.Slot >= 0))
         {
             Send(link.Id, start);
@@ -761,18 +762,25 @@ public sealed class NetworkSession : IDisposable
             return;
         }
 
-        if (MapHash(seats.Count) != start.MapHash)
+        if (lobby.MapCode.Length > 0 && !MapSettings.TryParseCode(lobby.MapCode, out _))
+        {
+            Fail($"The host's map {lobby.MapCode} is unknown to this build (version mismatch).");
+            return;
+        }
+
+        var map = MapOf(lobby);
+        if (MatchMap.HashOf(map, seats.Count) != start.MapHash)
         {
             Fail("This build generates a different map from the host's (version mismatch).");
             return;
         }
 
-        var spec = MatchSpec.Skirmish(lobby.Seed, seats.Count) with
+        var spec = (MatchSpec.Skirmish(lobby.Seed, seats.Count) with
         {
             Controllers = seats.Select(seat => seat.Seat.Kind == SlotKind.Human ? PlayerController.Remote : PlayerController.ScriptedAi).ToArray(),
             Teams = seats.Select(seat => seat.Seat.Team).ToArray(),
             InputDelay = start.InputDelay,
-        };
+        }).WithGeneratedMap(map);
 
         Lobby = lobby;
         _start = start;
@@ -977,12 +985,9 @@ public sealed class NetworkSession : IDisposable
 
     private int AdvertisedPort => _options.AdvertisedPort ?? _transport.LocalEndPoint.Port;
 
-    private static ulong MapHash(int players)
-    {
-        var hasher = new StateHasher();
-        SkirmishMaps.Create(players).HashInto(ref hasher);
-        return hasher.Value;
-    }
+    /// <summary>The generated map a lobby plays on, or null for the hand-made map (or an unknown code).</summary>
+    public static MapSettings? MapOf(LobbyState? lobby) =>
+        lobby is not null && lobby.MapCode.Length > 0 && MapSettings.TryParseCode(lobby.MapCode, out var settings) ? settings : null;
 
     private void Broadcast(Message message)
     {

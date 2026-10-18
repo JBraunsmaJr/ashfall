@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
     <ProjectReference Include="..\Ashfall.Content\Ashfall.Content.csproj" />
     <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
+    <ProjectReference Include="..\Ashfall.MapGen\Ashfall.MapGen.csproj" />
     <ProjectReference Include="..\Ashfall.Networking\Ashfall.Networking.csproj" />
   </ItemGroup>
 

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using Ashfall.MapGen;
 using Ashfall.Session;
 
 namespace Ashfall.Client;
@@ -32,6 +33,10 @@ internal sealed record ClientOptions
           --no-validation        Disable it
           --no-vsync             Present as fast as possible (mailbox or immediate)
           --size <WxH>           Window size in pixels (default 1280x720)
+          --archetype <id>       Play a generated map: crossroads or riverlands (skirmish or --host)
+          --map-code <code>      Play the generated map with this code (e.g. CRS-...)
+          --slider <name=value>  Generated map slider 0-100 (size, richness, elevation, water,
+                                 chokepoints, basespacing, vegetation); repeatable
           --record <file>        Save a replay of the match when it ends or you leave
           -h, --help             Show this help
 
@@ -100,6 +105,9 @@ internal sealed record ClientOptions
 
     public bool IsNetwork => Host || Join is not null || Rejoin is not null;
 
+    /// <summary>The generated map to play (from --archetype/--slider or --map-code), or null for the hand-made one.</summary>
+    public MapSettings? GeneratedMap { get; init; }
+
     public bool Menu { get; init; }
 
     public bool Skirmish { get; init; }
@@ -110,6 +118,9 @@ internal sealed record ClientOptions
     /// <summary>--seed was given (otherwise a hosted game picks a random seed).</summary>
     public bool SeedGiven { get; init; }
 
+    /// <summary>The generated map came from --archetype, so its seed follows the match seed.</summary>
+    private bool MapSeedFromMatch { get; init; }
+
     /// <summary>Set by options that describe a skirmish, so it starts without the menu.</summary>
     private bool SkirmishImplied { get; init; }
 
@@ -118,7 +129,7 @@ internal sealed record ClientOptions
 
     public MatchSpec ToSpec()
     {
-        var spec = MatchSpec.Skirmish(Seed);
+        var spec = MatchSpec.Skirmish(Seed).WithGeneratedMap(GeneratedMap);
         return Spectate
             ? spec
             : spec.WithController(0, PlayerController.Human).WithController(1, Opponent);
@@ -209,6 +220,15 @@ internal sealed record ClientOptions
                 case "--port" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var port) && port <= 65535:
                     options = options with { Port = port };
                     break;
+                case "--archetype" when MapArchetypes.Find(value) is { } archetype:
+                    options = options with { GeneratedMap = new MapSettings(archetype, 0, options.GeneratedMap?.Sliders), MapSeedFromMatch = true, SkirmishImplied = true };
+                    break;
+                case "--map-code" when MapSettings.TryParseCode(value, out var code):
+                    options = options with { GeneratedMap = code, MapSeedFromMatch = false, SkirmishImplied = true };
+                    break;
+                case "--slider" when options.GeneratedMap is { } map && TryParseSlider(value, out var slider, out var level):
+                    options = options with { GeneratedMap = map.With(slider, level) };
+                    break;
                 case "--name" when value.Length > 0:
                     options = options with { Name = value, NameGiven = true };
                     break;
@@ -224,7 +244,34 @@ internal sealed record ClientOptions
             }
         }
 
+        if (options.MapSeedFromMatch && options.GeneratedMap is { } generated)
+        {
+            options = options with { GeneratedMap = generated.WithSeed((uint)(options.Seed & uint.MaxValue)) };
+        }
+
         return options;
+    }
+
+    private static bool TryParseSlider(string text, out MapSlider slider, out int value)
+    {
+        slider = default;
+        value = 0;
+        var parts = text.Split('=');
+        if (parts.Length != 2 || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out value) || value > 100)
+        {
+            return false;
+        }
+
+        foreach (var candidate in Enum.GetValues<MapSlider>())
+        {
+            if (string.Equals(candidate.ToString(), parts[0], StringComparison.OrdinalIgnoreCase))
+            {
+                slider = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryParsePoint(string text, out (float X, float Y) point)
