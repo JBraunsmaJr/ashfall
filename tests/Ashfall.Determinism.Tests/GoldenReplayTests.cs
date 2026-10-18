@@ -29,7 +29,7 @@ public class GoldenReplayTests
     public async Task Final_state_hash_matches_the_golden_file(string replay)
     {
         var result = await RunAsync(replay);
-        var golden = (await File.ReadAllTextAsync(GoldenPath(replay + ".hash"), TestContext.Current.CancellationToken)).Trim();
+        var golden = Clean(await File.ReadAllTextAsync(GoldenPath(replay + ".hash"), TestContext.Current.CancellationToken));
 
         Assert.Equal(golden, result.FinalStateHashText);
     }
@@ -41,8 +41,9 @@ public class GoldenReplayTests
         var result = await RunAsync(replay);
         var golden = await File.ReadAllLinesAsync(GoldenPath(replay + ".checkpoints"), TestContext.Current.CancellationToken);
         var expected = golden
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .Select(line => line.Split(' '))
+            .Select(Clean)
+            .Where(line => line.Length > 0)
+            .Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .Select(parts => new HashCheckpoint(
                 long.Parse(parts[0], CultureInfo.InvariantCulture),
                 ulong.Parse(parts[1].AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture)))
@@ -73,6 +74,9 @@ public class GoldenReplayTests
         await using var match = await HeadlessMatch.StartAsync(MatchSpec.ProvingGround(ProvingGround.DefaultSeed), GameSpeed.Unthrottled);
         return await match.RunTicksAsync(ProvingGround.DefaultTicks, cancellation);
     }
+
+    // Editors on Windows like to add byte-order marks (sometimes two) and CRLFs; neither is data.
+    private static string Clean(string text) => text.Replace("\uFEFF", string.Empty, StringComparison.Ordinal).Trim();
 
     private static string GoldenPath(string fileName) => Path.Combine(AppContext.BaseDirectory, "Golden", fileName);
 }

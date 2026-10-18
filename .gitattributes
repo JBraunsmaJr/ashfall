@@ -14,3 +14,4 @@
 *.glb binary
 *.wav binary
 *.ogg binary
+*.spv binary
