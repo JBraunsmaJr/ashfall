@@ -22,4 +22,13 @@ public sealed record EconomyRules
 
     /// <summary>Units queued per production structure.</summary>
     public int QueueCapacity { get; init; } = 5;
+
+    /// <summary>
+    /// In matches with regrowth: Cindrite a field cell regains every <see cref="CindriteRegrowIntervalTicks"/>, up to
+    /// the density it started with. A 25-cell field regains 12.5 a second: less than a fed nest eats, far less
+    /// than a harvester takes.
+    /// </summary>
+    public int CindriteRegrowAmount { get; init; } = 5;
+
+    public int CindriteRegrowIntervalTicks { get; init; } = 150;
 }

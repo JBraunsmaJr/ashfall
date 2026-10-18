@@ -22,6 +22,9 @@ public sealed record MatchSpec
     /// <summary>Most creatures a swarm match may ask for.</summary>
     public const int SwarmMaxCreatures = 20_000;
 
+    /// <summary>Most nests a swarm match may ask for.</summary>
+    public const int SwarmMaxNests = 8;
+
     public required ulong Seed { get; init; }
 
     public MatchMode Mode { get; init; } = MatchMode.ProvingGround;
@@ -55,8 +58,14 @@ public sealed record MatchSpec
     /// <summary>Skirmish only: the procedural map to play on, or null for the hand-made duel/quad map.</summary>
     public MapSettings? GeneratedMap { get; init; }
 
-    /// <summary>Swarm only: how many creatures the Maw keeps alive.</summary>
+    /// <summary>Swarm only: how many creatures the Maw keeps alive (with nests: the most it may have alive).</summary>
     public int Creatures { get; init; }
+
+    /// <summary>
+    /// Swarm only: Spawning Pits on Cindrite fields around the fortress. 0 tops the swarm up from the map edges
+    /// instead; with nests, the Maw breeds only from them and fields regrow.
+    /// </summary>
+    public int Nests { get; init; }
 
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
@@ -85,7 +94,7 @@ public sealed record MatchSpec
     /// The horde stress test: one Bulwark fortress with idle defenders in the middle of an open
     /// <see cref="Maps.SwarmFortress.Size"/>-cell map, and a Maw that keeps <paramref name="creatures"/> alive.
     /// </summary>
-    public static MatchSpec Swarm(ulong seed, int creatures = SwarmDefaultCreatures) => new()
+    public static MatchSpec Swarm(ulong seed, int creatures = SwarmDefaultCreatures, int nests = 0) => new()
     {
         Seed = seed,
         Mode = MatchMode.Swarm,
@@ -94,6 +103,7 @@ public sealed record MatchSpec
         Controllers = [PlayerController.IdleAi],
         Teams = [0],
         Creatures = creatures,
+        Nests = nests,
     };
 
     public MatchSpec WithPlayers(int players) => this with { Players = players };
@@ -195,6 +205,8 @@ public sealed record MatchSpec
 
             ArgumentOutOfRangeException.ThrowIfNegative(Creatures, nameof(Creatures));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(Creatures, SwarmMaxCreatures, nameof(Creatures));
+            ArgumentOutOfRangeException.ThrowIfNegative(Nests, nameof(Nests));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(Nests, SwarmMaxNests, nameof(Nests));
         }
 
         if (Controllers.Count(controller => controller == PlayerController.Human) > 1)

@@ -20,7 +20,7 @@ public sealed class HordeSpawnSystem : ISystem
     {
         var simulation = context.Simulation;
         var maw = simulation.Maw;
-        if (maw is null || context.Tick < maw.Settings.FirstSpawnTick)
+        if (maw is null || !maw.Settings.EdgeSpawns || context.Tick < maw.Settings.FirstSpawnTick)
         {
             return;
         }

@@ -108,9 +108,18 @@ internal static class SwarmRunner
             var simulation = match.Simulation;
             var maw = simulation.Maw!;
             var (structures, units) = SwarmFortress.Survivors(simulation, player: 0);
+            var nests = simulation.World.Store<Nest>();
+            var biomass = 0;
+            foreach (var nest in nests.Components)
+            {
+                biomass += nest.Biomass;
+            }
+
+            var breeding = match.Spec.Nests == 0 ? string.Empty
+                : string.Create(CultureInfo.InvariantCulture, $" nests={nests.Count}/{match.Spec.Nests} biomass={biomass} cindrite={simulation.Map.TotalCindrite}");
             return string.Create(
                 CultureInfo.InvariantCulture,
-                $" creatures={simulation.World.Store<Creature>().Count} peak={maw.PeakAlive} spawned={maw.Spawned} killed={maw.Killed}" +
+                $" creatures={simulation.World.Store<Creature>().Count} peak={maw.PeakAlive} spawned={maw.Spawned} killed={maw.Killed}{breeding}" +
                 $" fortress: structures={structures} defenders={units} {(FellAt < 0 ? "held" : $"fell at tick {FellAt}")}" +
                 $" tick-ms: mean={Stats.Mean:F2} p95={Stats.P95:F2} max={Stats.Max:F2}" +
                 $" fighting: mean={Fighting.Mean:F2} p95={Fighting.P95:F2} max={Fighting.Max:F2}");

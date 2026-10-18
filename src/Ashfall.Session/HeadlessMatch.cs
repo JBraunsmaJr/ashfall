@@ -233,8 +233,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
         return simulation;
     }
 
-    // One Bulwark fortress (player 0, idle) against a Maw spawner that keeps spec.Creatures alive. No victory condition:
-    // the run lasts a fixed number of ticks.
+    // One Bulwark fortress (player 0, idle) against the Maw: an edge spawner that keeps spec.Creatures alive, or
+    // spec.Nests Spawning Pits on regrowing Cindrite fields, breeding up to that many. No victory condition: the run
+    // lasts a fixed number of ticks.
     private static GameSimulation CreateSwarm(MatchSpec spec)
     {
         var content = GameContent.Standard;
@@ -244,10 +245,13 @@ public sealed class HeadlessMatch : IAsyncDisposable
             Population = spec.Creatures,
             SpawnPerTick = 50,
             MinimumDistance = 24,
+            EdgeSpawns = spec.Nests == 0,
         };
         var simulation = new GameSimulation(
-            spec.Seed, SwarmFortress.Create(), content, [new PlayerSetup(spec.Teams[0], BulwarkContent.FactionId)], victoryEnabled: false, horde);
+            spec.Seed, SwarmFortress.Create(), content, [new PlayerSetup(spec.Teams[0], BulwarkContent.FactionId)], victoryEnabled: false, horde,
+            cindriteRegrowth: spec.Nests > 0);
         SwarmFortress.Build(simulation, player: 0);
+        SwarmFortress.PlaceNests(simulation, spec.Nests);
         return simulation;
     }
 

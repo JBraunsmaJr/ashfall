@@ -7,6 +7,7 @@
 /// <param name="Prerequisites">Roles the owner must already have completed before this can be placed.</param>
 /// <param name="FreeUnitId">A unit delivered when construction completes (the refinery's harvester), or null.</param>
 /// <param name="Sight">How far beyond its footprint the structure reveals the fog of war, in cells.</param>
+/// <param name="Armor">How the structure resists damage: <see cref="ArmorType.Structure"/> for buildings, Carapace for nests.</param>
 public sealed record StructureDefinition(
     string Id,
     string Name,
@@ -19,4 +20,5 @@ public sealed record StructureDefinition(
     int Power,
     IReadOnlyList<StructureRole> Prerequisites,
     string? FreeUnitId = null,
-    int Sight = 4);
+    int Sight = 4,
+    ArmorType Armor = ArmorType.Structure);

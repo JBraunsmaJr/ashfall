@@ -18,7 +18,8 @@ public sealed class GameContent
         IReadOnlyList<StructureDefinition> structures,
         IReadOnlyList<FactionDefinition> factions,
         EconomyRules economy,
-        IReadOnlyList<CreatureDefinition>? creatures = null)
+        IReadOnlyList<CreatureDefinition>? creatures = null,
+        IReadOnlyList<NestDefinition>? nests = null)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(structures);
@@ -30,6 +31,7 @@ public sealed class GameContent
         Factions = factions;
         Economy = economy;
         Creatures = creatures ?? [];
+        Nests = nests ?? [];
 
         for (var i = 0; i < units.Count; i++)
         {
@@ -65,12 +67,30 @@ public sealed class GameContent
     /// <summary>The Maw's creature types (GDD section 3). Empty for content without a horde.</summary>
     public IReadOnlyList<CreatureDefinition> Creatures { get; }
 
+    /// <summary>How each Maw nest feeds and spawns. Each names its structure (role Nest) and creature.</summary>
+    public IReadOnlyList<NestDefinition> Nests { get; }
+
     /// <summary>The content shipped with the game: the Bulwark and the Maw.</summary>
-    public static GameContent Standard { get; } = BulwarkContent.Create().WithCreatures(MawContent.Creatures());
+    public static GameContent Standard { get; } = MawContent.AddTo(BulwarkContent.Create());
 
     /// <summary>The same definitions with <paramref name="creatures"/> as the Maw's roster.</summary>
     public GameContent WithCreatures(IReadOnlyList<CreatureDefinition> creatures) =>
-        new(Units, Structures, Factions, Economy, creatures);
+        new(Units, Structures, Factions, Economy, creatures, Nests);
+
+    /// <summary>The nest rules for a structure type, or null if the structure is not a nest.</summary>
+    public NestDefinition? NestFor(int structureType)
+    {
+        var id = Structures[structureType].Id;
+        foreach (var nest in Nests)
+        {
+            if (string.Equals(nest.StructureId, id, StringComparison.Ordinal))
+            {
+                return nest;
+            }
+        }
+
+        return null;
+    }
 
     public int UnitIndex(string id) =>
         _unitIndices.TryGetValue(id, out var index) ? index : throw new KeyNotFoundException($"Unknown unit '{id}'.");
@@ -163,6 +183,23 @@ public sealed class GameContent
             hasher.Add(creature.Weapon.CooldownTicks);
         }
 
+        foreach (var structure in Structures)
+        {
+            hasher.Add((int)structure.Armor);
+        }
+
+        foreach (var nest in Nests)
+        {
+            hasher.Add(nest.StructureId);
+            hasher.Add(nest.CreatureId);
+            hasher.Add(nest.FeedRadius);
+            hasher.Add(nest.FeedIntervalTicks);
+            hasher.Add(nest.FeedAmount);
+            hasher.Add(nest.MaxBiomass);
+            hasher.Add(nest.StartingBiomass);
+            hasher.Add(nest.SpawnIntervalTicks);
+        }
+
         hasher.Add(Economy.StartingCredits);
         hasher.Add(Economy.HarvestAmount);
         hasher.Add(Economy.HarvestIntervalTicks);
@@ -170,6 +207,8 @@ public sealed class GameContent
         hasher.Add(Economy.LowPowerSlowdown);
         hasher.Add(Economy.BuildRadius);
         hasher.Add(Economy.QueueCapacity);
+        hasher.Add(Economy.CindriteRegrowAmount);
+        hasher.Add(Economy.CindriteRegrowIntervalTicks);
         for (var warhead = 0; warhead < Enum.GetValues<Warhead>().Length; warhead++)
         {
             for (var armor = 0; armor < Enum.GetValues<ArmorType>().Length; armor++)
@@ -236,6 +275,26 @@ public sealed class GameContent
                 || creature.Weapon.Damage <= 0 || creature.Weapon.CooldownTicks <= 0 || creature.Weapon.Range <= Fix64.Zero)
             {
                 throw new InvalidOperationException($"Creature '{creature.Id}' has a non-positive health, speed, cost or weapon value.");
+            }
+        }
+
+        if (Economy.CindriteRegrowAmount < 0 || Economy.CindriteRegrowIntervalTicks <= 0)
+        {
+            throw new InvalidOperationException("Cindrite regrowth needs a non-negative amount and a positive interval.");
+        }
+
+        foreach (var nest in Nests)
+        {
+            if (Structure(StructureIndex(nest.StructureId)).Role != StructureRole.Nest)
+            {
+                throw new InvalidOperationException($"Nest structure '{nest.StructureId}' does not have the Nest role.");
+            }
+
+            CreatureIndex(nest.CreatureId);
+            if (nest.FeedRadius < 0 || nest.FeedIntervalTicks <= 0 || nest.FeedAmount < 0 || nest.MaxBiomass <= 0
+                || nest.StartingBiomass < 0 || nest.StartingBiomass > nest.MaxBiomass || nest.SpawnIntervalTicks <= 0)
+            {
+                throw new InvalidOperationException($"Nest '{nest.StructureId}' has an out-of-range feeding or spawning value.");
             }
         }
 

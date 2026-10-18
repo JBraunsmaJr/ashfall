@@ -74,6 +74,14 @@ jobs:
           --hash-out swarm-${{ runner.os }}.hash
           --checkpoints-out swarm-${{ runner.os }}.checkpoints
 
+      - name: Nest-fed horde (M5) - eight Spawning Pits for six minutes, twice, must match, within budget
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode swarm --nests 8 --ticks 5400
+          --repeat 2 --tick-budget-ms 25
+          --hash-out nests-${{ runner.os }}.hash
+          --checkpoints-out nests-${{ runner.os }}.checkpoints
+
       - name: Map generation gate (M4) - slider sweeps on every archetype, all valid and fair
         run: >
           dotnet run --project tools/Ashfall.Tools.MapPreview -c Release --no-build --
@@ -95,6 +103,7 @@ jobs:
             skirmish-${{ runner.os }}.*
             generated-${{ runner.os }}.*
             swarm-${{ runner.os }}.*
+            nests-${{ runner.os }}.*
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet

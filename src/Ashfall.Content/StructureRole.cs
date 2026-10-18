@@ -8,4 +8,7 @@ public enum StructureRole : byte
     Refinery = 2,
     Barracks = 3,
     Factory = 4,
+
+    /// <summary>A Maw nest: never built by a player; it feeds on Cindrite and spawns creatures (GDD section 3).</summary>
+    Nest = 5,
 }

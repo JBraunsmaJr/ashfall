@@ -75,7 +75,7 @@ public class ReplayAndMapTests
     [Fact]
     public void Swarm_settings_round_trip_through_the_replay_codec()
     {
-        var spec = MatchSpec.Swarm(5, creatures: 2_500);
+        var spec = MatchSpec.Swarm(5, creatures: 2_500, nests: 6);
         var writer = new PacketWriter();
         MatchSpecCodec.Write(writer, spec);
 
@@ -83,6 +83,7 @@ public class ReplayAndMapTests
 
         Assert.Equal(MatchMode.Swarm, read.Mode);
         Assert.Equal(2_500, read.Creatures);
+        Assert.Equal(6, read.Nests);
         Assert.Equal(spec.Map, read.Map);
     }
 
@@ -168,7 +169,7 @@ public class ReplayAndMapTests
         var creatures = standard.Creatures.ToList();
         creatures[0] = creatures[0] with { Health = creatures[0].Health + 1 };
 
-        Assert.Equal(standard.ComputeHash(), BulwarkContent.Create().WithCreatures(MawContent.Creatures()).ComputeHash());
+        Assert.Equal(standard.ComputeHash(), MawContent.AddTo(BulwarkContent.Create()).ComputeHash());
         Assert.NotEqual(standard.ComputeHash(), tweaked.ComputeHash());
         Assert.NotEqual(standard.ComputeHash(), standard.WithCreatures(creatures).ComputeHash());
     }

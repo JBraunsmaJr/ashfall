@@ -50,7 +50,7 @@ Console.WriteLine(spec.Mode switch
         $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}"),
     MatchMode.Swarm => string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=swarm seed={spec.Seed} creatures={spec.Creatures} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} tick-budget={(options.TickBudgetMs is { } budget ? budget + "ms" : "none")}"),
+        $"mode=swarm seed={spec.Seed} creatures={spec.Creatures} nests={spec.Nests} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} tick-budget={(options.TickBudgetMs is { } budget ? budget + "ms" : "none")}"),
     _ => string.Create(
         CultureInfo.InvariantCulture,
         $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"),

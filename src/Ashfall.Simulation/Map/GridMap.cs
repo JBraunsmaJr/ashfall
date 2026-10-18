@@ -12,6 +12,10 @@ public sealed class GridMap
 
     private readonly Terrain[] _terrain;
     private readonly int[] _cindrite;
+
+    // The density each field cell was laid down with: what it regrows toward. Fixed once the map is built,
+    // so it is part of the map's description rather than changing state, and not hashed.
+    private readonly int[] _cindriteCap;
     private readonly int[] _structure;
     private readonly byte[] _height;
 
@@ -27,6 +31,7 @@ public sealed class GridMap
         Height = height;
         _terrain = new Terrain[width * height];
         _cindrite = new int[width * height];
+        _cindriteCap = new int[width * height];
         _structure = new int[width * height];
         _height = new byte[width * height];
         Array.Fill(_structure, NoStructure);
@@ -68,12 +73,33 @@ public sealed class GridMap
 
     public int CindriteAt(Cell cell) => InBounds(cell) ? _cindrite[IndexOf(cell)] : 0;
 
+    /// <summary>Lays down a field cell: sets its Cindrite and the density it regrows toward. Map building only.</summary>
     public void SetCindrite(Cell cell, int amount)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(amount);
         var index = IndexOf(cell);
         TotalCindrite += amount - _cindrite[index];
         _cindrite[index] = amount;
+        _cindriteCap[index] = amount;
+    }
+
+    /// <summary>The density a field cell regrows toward (0 for ground that never held Cindrite).</summary>
+    public int CindriteCapAt(Cell cell) => InBounds(cell) ? _cindriteCap[IndexOf(cell)] : 0;
+
+    /// <summary>Adds up to <paramref name="amount"/> Cindrite to a cell without passing its cap; returns what was added.</summary>
+    public int RegrowCindrite(Cell cell, int amount)
+    {
+        var index = IndexOf(cell);
+        var room = _cindriteCap[index] - _cindrite[index];
+        var added = room < amount ? room : amount;
+        if (added <= 0)
+        {
+            return 0;
+        }
+
+        _cindrite[index] += added;
+        TotalCindrite += added;
+        return added;
     }
 
     /// <summary>Removes up to <paramref name="amount"/> Cindrite from a cell and returns what was taken.</summary>

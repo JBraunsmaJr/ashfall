@@ -28,6 +28,7 @@ internal sealed record HeadlessOptions
           --map-code <code>       Generated map from a shareable map code (e.g. CRS-...)
           --units <n>             Proving only: units per player (default 100)
           --creatures <n>         Swarm only: creatures the Maw keeps alive (default 5000)
+          --nests <n>             Swarm only: breed from n Spawning Pits (0-8) instead of the map edges
           --tick-budget-ms <ms>   Swarm only: fail (exit 6) if the mean tick time exceeds this
           --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
@@ -77,6 +78,8 @@ internal sealed record HeadlessOptions
     public int Units { get; init; } = 100;
 
     public int Creatures { get; init; } = MatchSpec.SwarmDefaultCreatures;
+
+    public int Nests { get; init; }
 
     /// <summary>Swarm only: the largest acceptable mean tick time in milliseconds, or null for no limit.</summary>
     public int? TickBudgetMs { get; init; }
@@ -161,7 +164,7 @@ internal sealed record HeadlessOptions
     {
         MatchMode.Skirmish =>
             (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap),
-        MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures),
+        MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures, Nests),
         _ => MatchSpec.ProvingGround(Seed)
             .WithPlayers(Players)
             .WithUnitsPerPlayer(Units)
@@ -203,6 +206,7 @@ internal sealed record HeadlessOptions
                 "--teams" => TryTeams(value, v => options = options with { Teams = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),
                 "--creatures" => TryInt32(value, 0, v => options = options with { Creatures = v }) && options.Creatures <= MatchSpec.SwarmMaxCreatures,
+                "--nests" => TryInt32(value, 0, v => options = options with { Nests = v }) && options.Nests <= MatchSpec.SwarmMaxNests,
                 "--tick-budget-ms" => TryInt32(value, 1, v => options = options with { TickBudgetMs = v }),
                 "--map" => TryInt32(value, 1, v => options = options with { MapSize = v }),
                 "--report-every" => TryInt64(value, 0, v => options = options with { ReportEvery = v }),

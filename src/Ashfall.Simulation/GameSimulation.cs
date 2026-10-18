@@ -39,13 +39,15 @@ public sealed class GameSimulation
 
     /// <param name="victoryEnabled">When true, a player with no structures is defeated and the match ends when one team remains.</param>
     /// <param name="horde">How the Maw spawns, or null for a match without a horde.</param>
+    /// <param name="cindriteRegrowth">When true, harvested Cindrite fields grow back (see <see cref="CindriteRegrowthSystem"/>).</param>
     public GameSimulation(
         ulong seed,
         GridMap map,
         GameContent content,
         IReadOnlyList<PlayerSetup> players,
         bool victoryEnabled = true,
-        HordeSettings? horde = null)
+        HordeSettings? horde = null,
+        bool cindriteRegrowth = false)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(content);
@@ -55,6 +57,7 @@ public sealed class GameSimulation
         Map = map;
         Content = content;
         VictoryEnabled = victoryEnabled;
+        CindriteRegrowth = cindriteRegrowth;
         Random = new DeterministicRandom(seed);
         World = new World();
         Navigator = new Navigator(map);
@@ -90,6 +93,7 @@ public sealed class GameSimulation
         World.Register<Harvester>();
         World.Register<Producer>();
         World.Register<Creature>();
+        World.Register<Nest>();
 
         // System order is fixed and identical on every peer.
         _systems =
@@ -97,8 +101,10 @@ public sealed class GameSimulation
             new PowerSystem(),
             new ConstructionSystem(),
             new ProductionSystem(),
+            new CindriteRegrowthSystem(),
             new HarvestSystem(),
             new HordeSpawnSystem(),
+            new NestSystem(),
             new TargetingSystem(),
             new MovementSystem(),
             new SwarmSystem(),
@@ -137,6 +143,9 @@ public sealed class GameSimulation
     public VisibilityMap Visibility { get; }
 
     public bool VictoryEnabled { get; }
+
+    /// <summary>Whether Cindrite fields grow back in this match. Fixed when the match is created.</summary>
+    public bool CindriteRegrowth { get; }
 
     /// <summary>Number of ticks simulated so far. The next call to <see cref="Step"/> runs this tick.</summary>
     public long Tick { get; private set; }
@@ -201,6 +210,24 @@ public sealed class GameSimulation
         return creature;
     }
 
+    /// <summary>
+    /// Places a Maw nest (a structure with the Nest role) at <paramref name="origin"/>, stocked with its starting
+    /// biomass. Nests only work in a match with a horde: the horde's population limit and random stream drive them.
+    /// </summary>
+    public Entity PlaceNest(int structureType, Cell origin)
+    {
+        var rules = Content.NestFor(structureType)
+            ?? throw new ArgumentOutOfRangeException(nameof(structureType), structureType, "That structure is not a nest.");
+        if (Maw is null)
+        {
+            throw new InvalidOperationException("Nests need a match with a horde.");
+        }
+
+        var nest = PlaceStructure(MawPlayerId, structureType, origin);
+        World.Add(nest, new Nest(rules.StartingBiomass, rules.SpawnIntervalTicks));
+        return nest;
+    }
+
     /// <summary>Rebuilds <see cref="SwarmField"/> if the structure layout changed since it was built, and returns it.</summary>
     public FlowField RefreshSwarmField()
     {
@@ -230,7 +257,7 @@ public sealed class GameSimulation
             Fix64.FromInt(origin.Y) + Fix64.FromRatio(definition.Height, 2));
         World.Add(structure, new Position(center));
         World.Add(structure, new Owner(playerId));
-        World.Add(structure, new Health(definition.Health, definition.Health, ArmorType.Structure));
+        World.Add(structure, new Health(definition.Health, definition.Health, definition.Armor));
         World.Add(structure, new StructureInfo(structureType, origin, complete ? 0 : definition.BuildTicks));
         if (definition.Role is StructureRole.Barracks or StructureRole.Factory)
         {

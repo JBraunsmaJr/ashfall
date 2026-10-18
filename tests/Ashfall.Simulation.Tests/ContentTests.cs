@@ -36,7 +36,7 @@ public class ContentTests
         var faction = content.Faction(content.FactionIndex(BulwarkContent.FactionId));
 
         Assert.Equal(BulwarkContent.ConstructionYard, faction.StartingStructureId);
-        foreach (var role in Enum.GetValues<StructureRole>())
+        foreach (var role in Enum.GetValues<StructureRole>().Where(role => role != StructureRole.Nest))
         {
             Assert.Contains(faction.StructureIds, id => content.Structure(content.StructureIndex(id)).Role == role);
         }
@@ -104,6 +104,36 @@ public class ContentTests
 
         var twice = standard.Creatures.Concat(standard.Creatures).ToList();
         Assert.Throws<InvalidOperationException>(() => withoutMaw.WithCreatures(twice));
+    }
+
+    [Fact]
+    public void The_spawning_pit_is_a_carapace_nest_that_breeds_skitters()
+    {
+        var content = GameContent.Standard;
+        var pitType = content.StructureIndex(MawContent.SpawningPit);
+        var pit = content.Structure(pitType);
+        var nest = content.NestFor(pitType)!;
+
+        Assert.Equal(StructureRole.Nest, pit.Role);
+        Assert.Equal(ArmorType.Carapace, pit.Armor);
+        Assert.Equal(MawContent.Skitter, nest.CreatureId);
+        Assert.Null(content.NestFor(content.StructureIndex(BulwarkContent.Barracks)));
+        Assert.Equal(ArmorType.Structure, content.Structure(content.StructureIndex(BulwarkContent.Barracks)).Armor);
+        Assert.DoesNotContain(content.Faction(0).StructureIds, id => id == MawContent.SpawningPit);
+    }
+
+    [Fact]
+    public void Nests_must_name_a_nest_structure_and_a_known_creature()
+    {
+        var standard = GameContent.Standard;
+        var nest = standard.Nests[0];
+        GameContent With(NestDefinition changed) =>
+            new(standard.Units, standard.Structures, standard.Factions, standard.Economy, standard.Creatures, [changed]);
+
+        Assert.Throws<InvalidOperationException>(() => With(nest with { StructureId = BulwarkContent.Barracks }));
+        Assert.Throws<KeyNotFoundException>(() => With(nest with { CreatureId = "maw.ghost" }));
+        Assert.Throws<InvalidOperationException>(() => With(nest with { StartingBiomass = nest.MaxBiomass + 1 }));
+        Assert.NotEqual(standard.ComputeHash(), With(nest with { FeedAmount = nest.FeedAmount + 1 }).ComputeHash());
     }
 
     [Fact]

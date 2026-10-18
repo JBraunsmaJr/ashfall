@@ -69,6 +69,52 @@ public static class SwarmFortress
         };
     }
 
+    /// <summary>Distance from the map's centre to each nest, in cells: about two thirds of the way to the edge.</summary>
+    public const int NestDistance = 44;
+
+    /// <summary>Radius of the Cindrite field laid around each nest, in cells.</summary>
+    public const int NestFieldRadius = 4;
+
+    /// <summary>Cindrite per cell in a nest's field.</summary>
+    public const int NestFieldDensity = 400;
+
+    // Where nests go, in order: the four sides first, then the four diagonals (scaled so all sit NestDistance out).
+    private static readonly (int Dx, int Dy)[] NestDirections =
+    [
+        (NestDistance, 0), (0, NestDistance), (-NestDistance, 0), (0, -NestDistance),
+        (31, 31), (-31, 31), (-31, -31), (31, -31),
+    ];
+
+    /// <summary>
+    /// Places <paramref name="count"/> Spawning Pits (up to eight) in a ring around the fortress, each on a disc of
+    /// Cindrite to feed on. The match must have a horde.
+    /// </summary>
+    public static void PlaceNests(GameSimulation simulation, int count)
+    {
+        ArgumentNullException.ThrowIfNull(simulation);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, NestDirections.Length);
+        var pit = simulation.Content.StructureIndex(MawContent.SpawningPit);
+        const int middle = Size / 2;
+        for (var i = 0; i < count; i++)
+        {
+            var center = new Cell(middle + NestDirections[i].Dx, middle + NestDirections[i].Dy);
+            simulation.PlaceNest(pit, new Cell(center.X - 1, center.Y - 1));
+            for (var y = center.Y - NestFieldRadius; y <= center.Y + NestFieldRadius; y++)
+            {
+                for (var x = center.X - NestFieldRadius; x <= center.X + NestFieldRadius; x++)
+                {
+                    var cell = new Cell(x, y);
+                    var (dx, dy) = (x - center.X, y - center.Y);
+                    if ((dx * dx) + (dy * dy) <= NestFieldRadius * NestFieldRadius && simulation.Map.StructureAt(cell) < 0)
+                    {
+                        simulation.Map.SetCindrite(cell, NestFieldDensity);
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>The fortress's player's structures and units still standing.</summary>
     public static (int Structures, int Units) Survivors(GameSimulation simulation, int player)
     {

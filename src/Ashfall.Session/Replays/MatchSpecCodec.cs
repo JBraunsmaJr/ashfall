@@ -39,10 +39,13 @@ public static class MatchSpecCodec
 
         // Format 3: the swarm's creature count (0 outside swarm matches).
         writer.WriteInt32(spec.Creatures);
+
+        // Format 4: the swarm's nest count.
+        writer.WriteInt32(spec.Nests);
     }
 
-    /// <param name="formatVersion">The replay format: 1 had no map code (always a hand-made map), 2 no creature count.</param>
-    public static MatchSpec Read(PacketReader reader, int formatVersion = 3)
+    /// <param name="formatVersion">The replay format: 1 had no map code (always a hand-made map), 2 no creature count, 3 no nest count.</param>
+    public static MatchSpec Read(PacketReader reader, int formatVersion = 4)
     {
         ArgumentNullException.ThrowIfNull(reader);
         var seed = reader.ReadUInt64();
@@ -79,6 +82,7 @@ public static class MatchSpecCodec
         }
 
         var creatures = formatVersion >= 3 ? reader.ReadInt32() : 0;
+        var nests = formatVersion >= 4 ? reader.ReadInt32() : 0;
         var spec = new MatchSpec
         {
             Seed = seed,
@@ -94,6 +98,7 @@ public static class MatchSpecCodec
             Teams = teams,
             GeneratedMap = generated,
             Creatures = creatures,
+            Nests = nests,
         };
         try
         {
