@@ -49,11 +49,21 @@ jobs:
           --hash-out proving-ground-${{ runner.os }}.hash
           --checkpoints-out proving-ground-${{ runner.os }}.checkpoints
 
-      - name: Upload proving-ground hashes
+      - name: Skirmish to victory (twice, must match)
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode skirmish
+          --repeat 2
+          --hash-out skirmish-${{ runner.os }}.hash
+          --checkpoints-out skirmish-${{ runner.os }}.checkpoints
+
+      - name: Upload determinism hashes
         uses: actions/upload-artifact@v4
         with:
           name: determinism-${{ runner.os }}
-          path: proving-ground-${{ runner.os }}.*
+          path: |
+            proving-ground-${{ runner.os }}.*
+            skirmish-${{ runner.os }}.*
 
       - name: Upload test results
         if: failure()
@@ -96,7 +106,7 @@ jobs:
           grep -q "Presented 300 frames" render.log
 
   cross-platform-determinism:
-    # M0 exit gate: the same replay must produce the same hash on Windows and Linux.
+    # M0/M1 exit gates: the same replays must produce the same hashes on Windows and Linux.
     name: Cross-platform determinism
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -109,14 +119,18 @@ jobs:
 
       - name: Compare Linux and Windows hashes
         run: |
-          echo "## Proving-ground state hashes" >> "$GITHUB_STEP_SUMMARY"
-          echo "Linux:   $(cat proving-ground-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Windows: $(cat proving-ground-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"
-          if diff proving-ground-Linux.checkpoints proving-ground-Windows.checkpoints > checkpoint.diff; then
-            echo "Identical at every 30-tick checkpoint." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::error::Linux and Windows simulations diverged. First difference:"
-            head -n 4 checkpoint.diff
-            exit 1
-          fi
-          diff proving-ground-Linux.hash proving-ground-Windows.hash
+          status=0
+          for replay in proving-ground skirmish; do
+            echo "## ${replay} state hashes" >> "$GITHUB_STEP_SUMMARY"
+            echo "Linux:   $(cat ${replay}-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
+            echo "Windows: $(cat ${replay}-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"
+            if diff ${replay}-Linux.checkpoints ${replay}-Windows.checkpoints > ${replay}.diff \
+              && diff ${replay}-Linux.hash ${replay}-Windows.hash > /dev/null; then
+              echo "Identical at every 30-tick checkpoint." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::${replay}: Linux and Windows simulations diverged. First difference:"
+              head -n 4 ${replay}.diff
+              status=1
+            fi
+          done
+          exit $status

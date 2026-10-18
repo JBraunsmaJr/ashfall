@@ -16,7 +16,9 @@ public sealed record MatchResult(
     StopReason StopReason,
     long TicksRun,
     TimeSpan WallClockElapsed,
-    IReadOnlyList<HashCheckpoint> Checkpoints)
+    IReadOnlyList<HashCheckpoint> Checkpoints,
+    bool IsOver = false,
+    int WinningTeam = -1)
 {
     /// <summary>Simulation throughput of this run, in ticks per wall-clock second.</summary>
     public long TicksPerSecond =>

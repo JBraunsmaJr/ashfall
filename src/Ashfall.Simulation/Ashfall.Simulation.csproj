@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
+    <ProjectReference Include="..\Ashfall.Content\Ashfall.Content.csproj" />
   </ItemGroup>
 
 </Project>

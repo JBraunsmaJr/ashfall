@@ -1,16 +1,23 @@
 using Ashfall.Core;
+using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 
 namespace Ashfall.Session;
 
 /// <summary>
-/// Everything needed to start a match identically on every peer. In M0 this describes the
-/// "proving ground": an open map with wandering units, used to prove determinism. Factions, map
-/// archetypes, sliders and AI tiers join the spec in later milestones.
+/// Everything needed to start a match identically on every peer. Two modes for now: the M0 "proving
+/// ground" (open map, wandering units, used to prove determinism) and the M1 skirmish (a duel map,
+/// Bulwark bases, scripted AI players, played to victory). Map archetypes, sliders and AI tiers join
+/// the spec in later milestones.
 /// </summary>
 public sealed record MatchSpec
 {
+    /// <summary>Default skirmish tick limit: 60 minutes of game time. A match still running then is a failure.</summary>
+    public const long SkirmishTickLimit = 54_000;
+
     public required ulong Seed { get; init; }
+
+    public MatchMode Mode { get; init; } = MatchMode.ProvingGround;
 
     public MapBounds Map { get; init; } = new(64, 64);
 
@@ -29,6 +36,9 @@ public sealed record MatchSpec
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
+    /// <summary>A 1v1 Bulwark skirmish on the duel map, both sides played by the scripted M1 AI.</summary>
+    public static MatchSpec Skirmish(ulong seed) => new() { Seed = seed, Mode = MatchMode.Skirmish, Map = new MapBounds(DuelMap.Size, DuelMap.Size) };
+
     public MatchSpec WithPlayers(int players) => this with { Players = players };
 
     public MatchSpec WithUnitsPerPlayer(int units) => this with { UnitsPerPlayer = units };
@@ -42,6 +52,11 @@ public sealed record MatchSpec
     public void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(Players, 1, nameof(Players));
+        if (Mode == MatchMode.Skirmish && Players != 2)
+        {
+            throw new ArgumentOutOfRangeException(nameof(Players), Players, "The M1 duel map has exactly two start positions.");
+        }
+
         ArgumentOutOfRangeException.ThrowIfGreaterThan(Players, 8, nameof(Players));
         ArgumentOutOfRangeException.ThrowIfNegative(UnitsPerPlayer, nameof(UnitsPerPlayer));
         ArgumentOutOfRangeException.ThrowIfNegative(OrderIntervalTicks, nameof(OrderIntervalTicks));

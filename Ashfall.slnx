@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Ashfall.Core/Ashfall.Core.csproj" />
+    <Project Path="src/Ashfall.Content/Ashfall.Content.csproj" />
     <Project Path="src/Ashfall.Simulation/Ashfall.Simulation.csproj" />
     <Project Path="src/Ashfall.Session/Ashfall.Session.csproj" />
     <Project Path="src/Ashfall.Headless/Ashfall.Headless.csproj" />

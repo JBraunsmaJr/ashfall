@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Game content definitions: factions, units, structures, weapons, the damage matrix and economy rules. M1 defines the Bulwark in code; YAML loading and cooking replace this in a later milestone.</Description>
+    <AshfallDeterministic>true</AshfallDeterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -11,23 +11,36 @@ internal sealed record HeadlessOptions
 
         Usage: ashfall-headless [options]
 
+          --mode <mode>           proving (default): wandering units, fixed tick count
+                                  skirmish: 1v1 Bulwark duel between scripted AIs, run until a team wins
           --seed <n>              Match seed (default 20261017)
-          --ticks <n>             Ticks to run (default 1800 = 2 minutes of game time)
-          --players <n>           Players, 1-8 (default 2)
-          --units <n>             Units per player (default 100)
-          --map <n>               Square map size in cells (default 64)
+          --ticks <n>             Proving: ticks to run (default 1800 = 2 minutes of game time)
+                                  Skirmish: tick limit (default 54000 = 60 minutes); exit code 3 if no winner
+          --players <n>           Proving only: players, 1-8 (default 2)
+          --units <n>             Proving only: units per player (default 100)
+          --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
+          --report-every <n>      Print a status report every n ticks (skirmish tuning)
           --repeat <n>            Run the match n times and fail if any final hash differs (default 1)
           --hash-out <file>       Write the final state hash to a file (for CI comparisons)
           --checkpoints-out <f>   Write every 30-tick hash checkpoint to a file
           -h, --help              Show this help
 
-        Exit codes: 0 success, 1 hashes differed between repeats, 2 invalid arguments.
+        Exit codes: 0 success, 1 hashes differed between repeats, 2 invalid arguments,
+                    3 skirmish reached the tick limit without a winner.
         """;
+
+    /// <summary>Skirmish tick limit when --ticks is not given: 60 minutes of game time.</summary>
+    public const long DefaultSkirmishTickLimit = MatchSpec.SkirmishTickLimit;
+
+    public MatchMode Mode { get; init; } = MatchMode.ProvingGround;
 
     public ulong Seed { get; init; } = ProvingGround.DefaultSeed;
 
-    public long Ticks { get; init; } = ProvingGround.DefaultTicks;
+    /// <summary>Explicit --ticks value, if given.</summary>
+    public long? TicksOption { get; init; }
+
+    public long Ticks => TicksOption ?? (Mode == MatchMode.Skirmish ? DefaultSkirmishTickLimit : ProvingGround.DefaultTicks);
 
     public int Players { get; init; } = 2;
 
@@ -39,6 +52,9 @@ internal sealed record HeadlessOptions
 
     public int Repeat { get; init; } = 1;
 
+    /// <summary>Ticks between status reports; 0 for none.</summary>
+    public long ReportEvery { get; init; }
+
     public string? HashOut { get; init; }
 
     public string? CheckpointsOut { get; init; }
@@ -46,10 +62,12 @@ internal sealed record HeadlessOptions
     public bool ShowHelp { get; init; }
 
     public MatchSpec ToMatchSpec() =>
-        MatchSpec.ProvingGround(Seed)
-            .WithPlayers(Players)
-            .WithUnitsPerPlayer(Units)
-            .WithMap(MapSize, MapSize);
+        Mode == MatchMode.Skirmish
+            ? MatchSpec.Skirmish(Seed)
+            : MatchSpec.ProvingGround(Seed)
+                .WithPlayers(Players)
+                .WithUnitsPerPlayer(Units)
+                .WithMap(MapSize, MapSize);
 
     /// <summary>Parses arguments; returns null and sets <paramref name="error"/> when they are invalid.</summary>
     public static HeadlessOptions? Parse(IReadOnlyList<string> args, out string? error)
@@ -74,10 +92,12 @@ internal sealed record HeadlessOptions
             var parsed = name switch
             {
                 "--seed" => TryUInt64(value, v => options = options with { Seed = v }),
-                "--ticks" => TryInt64(value, 0, v => options = options with { Ticks = v }),
+                "--ticks" => TryInt64(value, 0, v => options = options with { TicksOption = v }),
+                "--mode" => TryMode(value, v => options = options with { Mode = v }),
                 "--players" => TryInt32(value, 1, v => options = options with { Players = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),
                 "--map" => TryInt32(value, 1, v => options = options with { MapSize = v }),
+                "--report-every" => TryInt64(value, 0, v => options = options with { ReportEvery = v }),
                 "--repeat" => TryInt32(value, 1, v => options = options with { Repeat = v }),
                 "--speed" => TrySpeed(value, v => options = options with { Speed = v }),
                 "--hash-out" => Set(() => options = options with { HashOut = value }),
@@ -132,6 +152,21 @@ internal sealed record HeadlessOptions
 
         apply(value);
         return true;
+    }
+
+    private static bool TryMode(string text, Action<MatchMode> apply)
+    {
+        switch (text.ToUpperInvariant())
+        {
+            case "PROVING":
+                apply(MatchMode.ProvingGround);
+                return true;
+            case "SKIRMISH":
+                apply(MatchMode.Skirmish);
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static bool TrySpeed(string text, Action<GameSpeed> apply)

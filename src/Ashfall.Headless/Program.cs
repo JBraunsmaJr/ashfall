@@ -26,20 +26,29 @@ Console.CancelKeyPress += (_, e) =>
 };
 
 var spec = options.ToMatchSpec();
-Console.WriteLine(string.Create(
-    CultureInfo.InvariantCulture,
-    $"seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"));
+Console.WriteLine(spec.Mode == MatchMode.Skirmish
+    ? string.Create(
+        CultureInfo.InvariantCulture,
+        $"mode=skirmish seed={spec.Seed} map={spec.Map.Width}x{spec.Map.Height} tick-limit={options.Ticks} speed={options.Speed}")
+    : string.Create(
+        CultureInfo.InvariantCulture,
+        $"mode=proving seed={spec.Seed} players={spec.Players} units/player={spec.UnitsPerPlayer} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} speed={options.Speed}"));
 
 MatchResult? first = null;
 var allMatch = true;
 for (var run = 1; run <= options.Repeat; run++)
 {
     await using var match = await HeadlessMatch.StartAsync(spec, options.Speed).ConfigureAwait(false);
-    var result = await match.RunTicksAsync(options.Ticks, cancellation.Token).ConfigureAwait(false);
+    var result = spec.Mode == MatchMode.Skirmish
+        ? await RunSkirmishAsync(match, options, cancellation.Token).ConfigureAwait(false)
+        : await match.RunTicksAsync(options.Ticks, cancellation.Token).ConfigureAwait(false);
 
+    var outcome = spec.Mode != MatchMode.Skirmish ? string.Empty
+        : result.IsOver ? string.Create(CultureInfo.InvariantCulture, $" winner=team {result.WinningTeam} ({result.FinalTick / 900.0:F1} game minutes)")
+        : " winner=none (tick limit reached)";
     Console.WriteLine(string.Create(
         CultureInfo.InvariantCulture,
-        $"run {run}: tick={result.FinalTick} hash={result.FinalStateHashText} elapsed={result.WallClockElapsed.TotalMilliseconds:F0}ms rate={result.TicksPerSecond} ticks/s"));
+        $"run {run}: tick={result.FinalTick} hash={result.FinalStateHashText} elapsed={result.WallClockElapsed.TotalMilliseconds:F0}ms rate={result.TicksPerSecond} ticks/s{outcome}"));
 
     if (first is null)
     {
@@ -78,4 +87,29 @@ if (options.Repeat > 1)
     Console.WriteLine(allMatch ? $"All {options.Repeat} runs produced identical hashes." : "Runs diverged.");
 }
 
-return allMatch ? 0 : 1;
+if (!allMatch)
+{
+    return 1;
+}
+
+return spec.Mode == MatchMode.Skirmish && first is { IsOver: false } ? 3 : 0;
+
+// Runs to completion, pausing every --report-every ticks to print a status report.
+static async Task<MatchResult> RunSkirmishAsync(HeadlessMatch match, HeadlessOptions options, CancellationToken cancellationToken)
+{
+    if (options.ReportEvery <= 0)
+    {
+        return await match.RunToCompletionAsync(options.Ticks, cancellationToken).ConfigureAwait(false);
+    }
+
+    MatchResult result;
+    do
+    {
+        var remaining = options.Ticks - match.Tick;
+        result = await match.RunToCompletionAsync(Math.Min(options.ReportEvery, remaining), cancellationToken).ConfigureAwait(false);
+        Console.WriteLine(MatchReport.Describe(match.Simulation));
+    }
+    while (!result.IsOver && match.Tick < options.Ticks);
+
+    return result;
+}

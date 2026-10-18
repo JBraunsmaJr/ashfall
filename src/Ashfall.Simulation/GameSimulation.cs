@@ -1,44 +1,100 @@
+using Ashfall.Content;
 using Ashfall.Core;
 using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Map;
+using Ashfall.Simulation.Navigation;
+using Ashfall.Simulation.Orders;
+using Ashfall.Simulation.Players;
+using Ashfall.Simulation.Production;
 using Ashfall.Simulation.Systems;
 
 namespace Ashfall.Simulation;
 
 /// <summary>
-/// The authoritative, deterministic game state. Given the same seed, the same setup calls and the
-/// same command list for every tick, every instance reaches a bit-identical state on any machine.
+/// The authoritative, deterministic game state. Given the same seed, map, content, players, setup calls
+/// and the same command list for every tick, every instance reaches a bit-identical state on any machine.
 /// </summary>
 public sealed class GameSimulation
 {
     private readonly ISystem[] _systems;
+    private readonly PlayerState[] _players;
     private Command[] _commandScratch = new Command[64];
 
+    /// <summary>An open map with no players or content rules in play: units only move (the M0 proving ground).</summary>
     public GameSimulation(ulong seed, MapBounds bounds)
+        : this(seed, CreateOpenMap(bounds), GameContent.Standard, [], victoryEnabled: false)
     {
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(bounds), bounds, "Map must be at least one cell in each direction.");
-        }
+    }
+
+    /// <param name="victoryEnabled">When true, a player with no structures is defeated and the match ends when one team remains.</param>
+    public GameSimulation(
+        ulong seed,
+        GridMap map,
+        GameContent content,
+        IReadOnlyList<PlayerSetup> players,
+        bool victoryEnabled = true)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(players);
 
         Seed = seed;
-        Bounds = bounds;
+        Map = map;
+        Content = content;
+        VictoryEnabled = victoryEnabled;
         Random = new DeterministicRandom(seed);
         World = new World();
+        Navigator = new Navigator(map);
+
+        _players = new PlayerState[players.Count];
+        for (var id = 0; id < players.Count; id++)
+        {
+            var faction = content.FactionIndex(players[id].FactionId);
+            _players[id] = new PlayerState(id, players[id].Team, faction, content.Economy.StartingCredits);
+        }
 
         // Registration order is part of the state hash: append new component types at the end.
         World.Register<Position>();
         World.Register<Mover>();
         World.Register<Owner>();
+        World.Register<Health>();
+        World.Register<UnitInfo>();
+        World.Register<StructureInfo>();
+        World.Register<Armament>();
+        World.Register<UnitOrder>();
+        World.Register<Harvester>();
+        World.Register<Producer>();
 
         // System order is fixed and identical on every peer.
-        _systems = [new MovementSystem()];
+        _systems =
+        [
+            new PowerSystem(),
+            new ConstructionSystem(),
+            new ProductionSystem(),
+            new HarvestSystem(),
+            new TargetingSystem(),
+            new MovementSystem(),
+            new WeaponSystem(),
+            new DeathSystem(),
+            new VictorySystem(),
+        ];
     }
 
     public ulong Seed { get; }
 
-    public MapBounds Bounds { get; }
+    public GridMap Map { get; }
+
+    public MapBounds Bounds => Map.Bounds;
+
+    public GameContent Content { get; }
+
+    public IReadOnlyList<PlayerState> Players => _players;
+
+    public Navigator Navigator { get; }
+
+    public bool VictoryEnabled { get; }
 
     /// <summary>Number of ticks simulated so far. The next call to <see cref="Step"/> runs this tick.</summary>
     public long Tick { get; private set; }
@@ -48,10 +104,16 @@ public sealed class GameSimulation
     /// <summary>The match's single random stream. Only the simulation may draw from it.</summary>
     public DeterministicRandom Random { get; }
 
-    /// <summary>Commands rejected so far (dead unit, wrong owner, unknown kind). Part of the state hash.</summary>
+    /// <summary>Commands rejected so far (invalid, unaffordable, not your unit). Part of the state hash.</summary>
     public long RejectedCommands { get; private set; }
 
-    /// <summary>Creates a unit owned by <paramref name="playerId"/>. Call during setup, identically on every peer.</summary>
+    /// <summary>True once at most one team has undefeated players.</summary>
+    public bool IsOver { get; internal set; }
+
+    /// <summary>The team that won, or -1 while the match runs (or if everyone lost at once).</summary>
+    public int WinningTeam { get; internal set; } = -1;
+
+    /// <summary>Creates a bare mover with no content definition (the M0 proving ground's units).</summary>
     public Entity SpawnUnit(int playerId, FixVec2 position, Fix64 speedPerTick)
     {
         var unit = World.Create();
@@ -61,16 +123,187 @@ public sealed class GameSimulation
         return unit;
     }
 
+    /// <summary>Creates a unit of a content-defined type at a position.</summary>
+    public Entity SpawnUnit(int playerId, int unitType, FixVec2 position)
+    {
+        var definition = Content.Unit(unitType);
+        var unit = World.Create();
+        World.Add(unit, new Position(Bounds.Clamp(position)));
+        World.Add(unit, Mover.Idle(definition.SpeedPerTick));
+        World.Add(unit, new Owner(playerId));
+        World.Add(unit, new Health(definition.Health, definition.Health, definition.Armor));
+        World.Add(unit, new UnitInfo(unitType));
+        World.Add(unit, UnitOrder.Idle);
+        if (definition.Weapon is not null)
+        {
+            World.Add(unit, new Armament(0, Entity.None));
+        }
+
+        if (definition.IsHarvester)
+        {
+            World.Add(unit, Harvester.Empty);
+        }
+
+        return unit;
+    }
+
+    /// <summary>
+    /// Places a structure without cost or placement rules, for match setup (starting bases). Complete
+    /// structures work immediately; incomplete ones start construction.
+    /// </summary>
+    public Entity PlaceStructure(int playerId, int structureType, Cell origin, bool complete = true)
+    {
+        var definition = Content.Structure(structureType);
+        if (!IsFootprintFree(origin, definition.Width, definition.Height))
+        {
+            throw new InvalidOperationException($"Cannot place {definition.Name} at {origin}: the footprint is blocked.");
+        }
+
+        var structure = World.Create();
+        var center = new FixVec2(
+            Fix64.FromInt(origin.X) + Fix64.FromRatio(definition.Width, 2),
+            Fix64.FromInt(origin.Y) + Fix64.FromRatio(definition.Height, 2));
+        World.Add(structure, new Position(center));
+        World.Add(structure, new Owner(playerId));
+        World.Add(structure, new Health(definition.Health, definition.Health, ArmorType.Structure));
+        World.Add(structure, new StructureInfo(structureType, origin, complete ? 0 : definition.BuildTicks));
+        if (definition.Role is StructureRole.Barracks or StructureRole.Factory)
+        {
+            World.Add(structure, new Producer());
+        }
+
+        Map.SetStructure(origin, definition.Width, definition.Height, structure.Index);
+        return structure;
+    }
+
+    /// <summary>Why a structure cannot be placed, or <see cref="PlacementResult.Ok"/>.</summary>
+    public PlacementResult CheckPlacement(int playerId, int structureType, Cell origin)
+    {
+        if (playerId < 0 || playerId >= _players.Length || _players[playerId].Defeated)
+        {
+            return PlacementResult.NotAPlayer;
+        }
+
+        if (structureType < 0 || structureType >= Content.Structures.Count)
+        {
+            return PlacementResult.UnknownStructure;
+        }
+
+        var player = _players[playerId];
+        var definition = Content.Structure(structureType);
+        var faction = Content.Faction(player.Faction);
+        if (!faction.StructureIds.Contains(definition.Id) || definition.Role == StructureRole.ConstructionYard)
+        {
+            return PlacementResult.NotBuildable;
+        }
+
+        if (!HasCompletedRole(playerId, StructureRole.ConstructionYard))
+        {
+            return PlacementResult.NoConstructionYard;
+        }
+
+        if (World.IsAlive(player.ConstructionSite))
+        {
+            return PlacementResult.AlreadyBuilding;
+        }
+
+        foreach (var role in definition.Prerequisites)
+        {
+            if (!HasCompletedRole(playerId, role))
+            {
+                return PlacementResult.MissingPrerequisite;
+            }
+        }
+
+        if (!player.CanAfford(definition.Cost))
+        {
+            return PlacementResult.CannotAfford;
+        }
+
+        if (!IsFootprintFree(origin, definition.Width, definition.Height))
+        {
+            return PlacementResult.Blocked;
+        }
+
+        return IsNearOwnStructure(playerId, origin, definition.Width, definition.Height)
+            ? PlacementResult.Ok
+            : PlacementResult.TooFarFromBase;
+    }
+
+    /// <summary>True if the player owns a completed structure with this role.</summary>
+    public bool HasCompletedRole(int playerId, StructureRole role)
+    {
+        var structures = World.Store<StructureInfo>();
+        var owners = World.Store<Owner>();
+        var indices = structures.EntityIndices;
+        var infos = structures.Components;
+        for (var i = 0; i < infos.Length; i++)
+        {
+            if (infos[i].IsComplete
+                && owners.Get(indices[i]).PlayerId == playerId
+                && Content.Structure(infos[i].StructureType).Role == role)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>True if the two owners are players on different teams. Units without a player are nobody's enemy.</summary>
+    public bool AreEnemies(int playerA, int playerB) =>
+        playerA >= 0 && playerB >= 0 && playerA < _players.Length && playerB < _players.Length
+        && _players[playerA].Team != _players[playerB].Team;
+
+    /// <summary>The point of <paramref name="target"/> closest to <paramref name="from"/>: its position, or the nearest point of a structure's footprint.</summary>
+    public FixVec2 ClosestPointOf(Entity target, FixVec2 from)
+    {
+        if (World.Has<StructureInfo>(target))
+        {
+            var info = World.Get<StructureInfo>(target);
+            var definition = Content.Structure(info.StructureType);
+            var minX = Fix64.FromInt(info.Origin.X);
+            var minY = Fix64.FromInt(info.Origin.Y);
+            return new FixVec2(
+                Fix64.Clamp(from.X, minX, minX + Fix64.FromInt(definition.Width)),
+                Fix64.Clamp(from.Y, minY, minY + Fix64.FromInt(definition.Height)));
+        }
+
+        return World.Get<Position>(target).Value;
+    }
+
+    /// <summary>Creates a unit at the nearest free cell outside a structure's front edge.</summary>
+    public Entity SpawnUnitAt(Entity structure, int unitType)
+    {
+        var info = World.Get<StructureInfo>(structure);
+        var owner = World.Get<Owner>(structure).PlayerId;
+        var exit = ExitCell(info);
+        var position = Navigator.TryFindNearestPassable(exit, maxRadius: 8, out var cell)
+            ? cell.Center
+            : World.Get<Position>(structure).Value;
+        return SpawnUnit(owner, unitType, position);
+    }
+
+    /// <summary>The cell just below the middle of a structure's footprint, where units leave and harvesters dock.</summary>
+    public Cell ExitCell(StructureInfo info)
+    {
+        var definition = Content.Structure(info.StructureType);
+        return new Cell(info.Origin.X + (definition.Width / 2), info.Origin.Y + definition.Height);
+    }
+
     /// <summary>Advances one tick: applies this tick's commands, runs every system, then applies destruction.</summary>
     /// <param name="commands">All commands scheduled for this tick, from every player. Order between players does not matter.</param>
     public void Step(ReadOnlySpan<Command> commands)
     {
         foreach (var command in SortByPlayer(commands))
         {
-            Apply(command);
+            if (!Apply(command))
+            {
+                RejectedCommands++;
+            }
         }
 
-        var context = new TickContext(Tick, World, Random, Bounds);
+        var context = new TickContext(Tick, this);
         foreach (var system in _systems)
         {
             system.Update(context);
@@ -86,42 +319,243 @@ public sealed class GameSimulation
         var hasher = new StateHasher();
         hasher.Add(Tick);
         hasher.Add(Seed);
-        hasher.Add(Bounds.Width);
-        hasher.Add(Bounds.Height);
         var random = Random.Snapshot;
         hasher.Add(random.State);
         hasher.Add(random.Increment);
         hasher.Add(RejectedCommands);
+        hasher.Add(IsOver);
+        hasher.Add(WinningTeam);
+        foreach (var player in _players)
+        {
+            player.HashInto(ref hasher);
+        }
+
+        Map.HashInto(ref hasher);
         World.HashInto(ref hasher);
+        Navigator.Paths.HashInto(ref hasher);
         return hasher.Value;
     }
 
-    private void Apply(in Command command)
+    private static GridMap CreateOpenMap(MapBounds bounds)
     {
-        if (!World.IsAlive(command.Unit)
-            || !World.Has<Owner>(command.Unit)
-            || World.Get<Owner>(command.Unit).PlayerId != command.PlayerId
-            || !World.Has<Mover>(command.Unit))
+        if (bounds.Width <= 0 || bounds.Height <= 0)
         {
-            RejectedCommands++;
-            return;
+            throw new ArgumentOutOfRangeException(nameof(bounds), bounds, "Map must be at least one cell in each direction.");
+        }
+
+        return new GridMap(bounds.Width, bounds.Height);
+    }
+
+    private bool Apply(in Command command) => command.Kind switch
+    {
+        CommandKind.Move => ApplyMove(command),
+        CommandKind.Stop => ApplyStop(command),
+        CommandKind.Attack => ApplyAttack(command),
+        CommandKind.AttackMove => ApplyAttackMove(command),
+        CommandKind.Build => ApplyBuild(command),
+        CommandKind.Train => ApplyTrain(command),
+        CommandKind.None => false,
+        _ => false,
+    };
+
+    private bool OwnsLiveUnit(in Command command) =>
+        World.IsAlive(command.Unit)
+        && World.Has<Owner>(command.Unit)
+        && World.Get<Owner>(command.Unit).PlayerId == command.PlayerId
+        && World.Has<Mover>(command.Unit);
+
+    private bool ApplyMove(in Command command)
+    {
+        if (!OwnsLiveUnit(command))
+        {
+            return false;
+        }
+
+        SetOrder(command.Unit, new UnitOrder(OrderKind.Move, Entity.None, command.Target));
+        if (World.Has<Harvester>(command.Unit))
+        {
+            World.Get<Harvester>(command.Unit).State = HarvestState.Idle;
         }
 
         ref var mover = ref World.Get<Mover>(command.Unit);
-        switch (command.Kind)
+        Navigator.PlanRoute(command.Unit.Index, World.Get<Position>(command.Unit).Value, command.Target, ref mover);
+        return true;
+    }
+
+    private bool ApplyStop(in Command command)
+    {
+        if (!OwnsLiveUnit(command))
         {
-            case CommandKind.Move:
-                mover.Target = Bounds.Clamp(command.Target);
-                mover.HasTarget = true;
-                break;
-            case CommandKind.Stop:
-                mover.HasTarget = false;
-                break;
-            case CommandKind.None:
-            default:
-                RejectedCommands++;
-                break;
+            return false;
         }
+
+        ref var mover = ref World.Get<Mover>(command.Unit);
+        mover.HasTarget = false;
+        Navigator.Paths.Clear(command.Unit.Index);
+        SetOrder(command.Unit, UnitOrder.Idle);
+        if (World.Has<Armament>(command.Unit))
+        {
+            World.Get<Armament>(command.Unit).Target = Entity.None;
+        }
+
+        return true;
+    }
+
+    private bool ApplyAttack(in Command command)
+    {
+        if (!OwnsLiveUnit(command)
+            || !World.Has<Armament>(command.Unit)
+            || !World.IsAlive(command.TargetEntity)
+            || !World.Has<Health>(command.TargetEntity)
+            || !AreEnemies(command.PlayerId, World.Get<Owner>(command.TargetEntity).PlayerId))
+        {
+            return false;
+        }
+
+        SetOrder(command.Unit, new UnitOrder(OrderKind.Attack, command.TargetEntity, FixVec2.Zero));
+        World.Get<Armament>(command.Unit).Target = command.TargetEntity;
+        return true;
+    }
+
+    private bool ApplyAttackMove(in Command command)
+    {
+        if (!OwnsLiveUnit(command) || !World.Has<Armament>(command.Unit))
+        {
+            return false;
+        }
+
+        SetOrder(command.Unit, new UnitOrder(OrderKind.AttackMove, Entity.None, command.Target));
+        ref var mover = ref World.Get<Mover>(command.Unit);
+        Navigator.PlanRoute(command.Unit.Index, World.Get<Position>(command.Unit).Value, command.Target, ref mover);
+        return true;
+    }
+
+    private bool ApplyBuild(in Command command)
+    {
+        if (CheckPlacement(command.PlayerId, command.TypeIndex, command.Cell) != PlacementResult.Ok)
+        {
+            return false;
+        }
+
+        var player = _players[command.PlayerId];
+        player.Spend(Content.Structure(command.TypeIndex).Cost);
+        player.ConstructionSite = PlaceStructure(command.PlayerId, command.TypeIndex, command.Cell, complete: false);
+        return true;
+    }
+
+    private bool ApplyTrain(in Command command)
+    {
+        if (command.PlayerId < 0 || command.PlayerId >= _players.Length
+            || command.TypeIndex < 0 || command.TypeIndex >= Content.Units.Count
+            || !World.IsAlive(command.Unit)
+            || !World.Has<Producer>(command.Unit)
+            || World.Get<Owner>(command.Unit).PlayerId != command.PlayerId
+            || !World.Get<StructureInfo>(command.Unit).IsComplete)
+        {
+            return false;
+        }
+
+        var player = _players[command.PlayerId];
+        var unit = Content.Unit(command.TypeIndex);
+        var producerRole = Content.Structure(World.Get<StructureInfo>(command.Unit).StructureType).Role;
+        ref var producer = ref World.Get<Producer>(command.Unit);
+        if (player.Defeated
+            || unit.ProducedBy != producerRole
+            || !Content.Faction(player.Faction).UnitIds.Contains(unit.Id)
+            || producer.IsFull
+            || !player.CanAfford(unit.Cost))
+        {
+            return false;
+        }
+
+        player.Spend(unit.Cost);
+        if (producer.IsIdle)
+        {
+            producer.Remaining = unit.BuildTicks;
+        }
+
+        producer.TryEnqueue(command.TypeIndex);
+        return true;
+    }
+
+    private void SetOrder(Entity unit, UnitOrder order)
+    {
+        if (World.Has<UnitOrder>(unit))
+        {
+            World.Get<UnitOrder>(unit) = order;
+        }
+    }
+
+    private bool IsFootprintFree(Cell origin, int width, int height)
+    {
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                if (!Map.IsBuildable(new Cell(origin.X + x, origin.Y + y)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        // No unit may be standing where the structure goes.
+        var minX = Fix64.FromInt(origin.X);
+        var minY = Fix64.FromInt(origin.Y);
+        var maxX = minX + Fix64.FromInt(width);
+        var maxY = minY + Fix64.FromInt(height);
+        var positions = World.Store<Position>();
+        var indices = positions.EntityIndices;
+        var values = positions.Components;
+        var structures = World.Store<StructureInfo>();
+        for (var i = 0; i < values.Length; i++)
+        {
+            var point = values[i].Value;
+            if (!structures.Has(indices[i])
+                && point.X >= minX && point.X < maxX && point.Y >= minY && point.Y < maxY)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool IsNearOwnStructure(int playerId, Cell origin, int width, int height)
+    {
+        var radius = Content.Economy.BuildRadius;
+        var structures = World.Store<StructureInfo>();
+        var owners = World.Store<Owner>();
+        var indices = structures.EntityIndices;
+        var infos = structures.Components;
+        for (var i = 0; i < infos.Length; i++)
+        {
+            if (owners.Get(indices[i]).PlayerId != playerId)
+            {
+                continue;
+            }
+
+            var other = Content.Structure(infos[i].StructureType);
+            var gapX = Gap(origin.X, width, infos[i].Origin.X, other.Width);
+            var gapY = Gap(origin.Y, height, infos[i].Origin.Y, other.Height);
+            if (gapX <= radius && gapY <= radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Empty cells between two spans on one axis (0 if they touch or overlap).
+    private static int Gap(int startA, int lengthA, int startB, int lengthB)
+    {
+        if (startA + lengthA <= startB)
+        {
+            return startB - (startA + lengthA);
+        }
+
+        return startB + lengthB <= startA ? startA - (startB + lengthB) : 0;
     }
 
     // Stable insertion sort by player id: within one player, the order the player issued commands is kept.

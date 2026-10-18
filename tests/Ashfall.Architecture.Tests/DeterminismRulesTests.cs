@@ -1,4 +1,5 @@
 using System.Reflection;
+using Ashfall.Content;
 using Ashfall.Core;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Ecs;
@@ -16,13 +17,18 @@ public class DeterminismRulesTests
     private const BindingFlags EveryMember =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    public static TheoryData<string> DeterministicAssemblies => new() { "Ashfall.Core", "Ashfall.Simulation" };
+    public static TheoryData<string> DeterministicAssemblies => new() { "Ashfall.Core", "Ashfall.Content", "Ashfall.Simulation" };
 
     [Theory]
     [MemberData(nameof(DeterministicAssemblies))]
     public void No_floating_point_types_in_deterministic_assemblies(string assemblyName)
     {
-        var assembly = assemblyName == "Ashfall.Core" ? typeof(Fix64).Assembly : typeof(GameSimulation).Assembly;
+        var assembly = assemblyName switch
+        {
+            "Ashfall.Core" => typeof(Fix64).Assembly,
+            "Ashfall.Content" => typeof(GameContent).Assembly,
+            _ => typeof(GameSimulation).Assembly,
+        };
 
         var violations = assembly.GetTypes().SelectMany(FloatingPointUsages);
 
@@ -37,6 +43,7 @@ public class DeterminismRulesTests
             .ToList();
 
         Assert.NotEmpty(componentTypes);
+        Assert.DoesNotContain(componentTypes, type => type.IsEnum); // enums belong with their concept (Orders, Map, ...)
         foreach (var type in componentTypes)
         {
             Assert.True(typeof(IStateHashable).IsAssignableFrom(type), $"{type.Name} must implement IStateHashable.");

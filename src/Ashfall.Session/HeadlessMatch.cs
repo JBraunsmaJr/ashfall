@@ -1,8 +1,12 @@
 using System.Runtime.InteropServices;
+using Ashfall.Content;
 using Ashfall.Core;
+using Ashfall.Session.Ai;
 using Ashfall.Session.Commands;
+using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Commands;
+using Ashfall.Simulation.Players;
 
 namespace Ashfall.Session;
 
@@ -24,6 +28,12 @@ public sealed class HeadlessMatch : IAsyncDisposable
         Spec = spec;
         _timeProvider = timeProvider;
         Clock = new SessionClock(speed, timeProvider);
+        if (spec.Mode == MatchMode.Skirmish)
+        {
+            Simulation = CreateSkirmish(spec, _sources);
+            return;
+        }
+
         Simulation = new GameSimulation(spec.Seed, spec.Map);
         SpawnStartingUnits();
 
@@ -43,6 +53,12 @@ public sealed class HeadlessMatch : IAsyncDisposable
     public SessionClock Clock { get; }
 
     public long Tick => Simulation.Tick;
+
+    /// <summary>True once the simulation has declared a result (skirmish only).</summary>
+    public bool IsOver => Simulation.IsOver;
+
+    /// <summary>The winning team, or -1 while the match runs or after a draw.</summary>
+    public int WinningTeam => Simulation.WinningTeam;
 
     public IReadOnlyList<HashCheckpoint> Checkpoints => _checkpoints;
 
@@ -128,7 +144,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
             reason,
             Simulation.Tick - firstTick,
             _timeProvider.GetElapsedTime(started),
-            _checkpoints.ToArray());
+            _checkpoints.ToArray(),
+            Simulation.IsOver,
+            Simulation.WinningTeam);
     }
 
     /// <summary>Runs exactly <paramref name="ticks"/> ticks at the clock's speed.</summary>
@@ -136,6 +154,25 @@ public sealed class HeadlessMatch : IAsyncDisposable
         RunUntilAsync(static _ => false, ticks, cancellationToken);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    /// <summary>Runs until the simulation declares a result or <paramref name="maxTicks"/> ticks have run.</summary>
+    public Task<MatchResult> RunToCompletionAsync(long maxTicks, CancellationToken cancellationToken = default) =>
+        RunUntilAsync(static match => match.IsOver, maxTicks, cancellationToken);
+
+    private static GameSimulation CreateSkirmish(MatchSpec spec, List<ICommandSource> sources)
+    {
+        var content = GameContent.Standard;
+        PlayerSetup[] players = [new(Team: 0, BulwarkContent.FactionId), new(Team: 1, BulwarkContent.FactionId)];
+        var simulation = new GameSimulation(spec.Seed, DuelMap.Create(), content, players);
+        var yard = content.StructureIndex(BulwarkContent.ConstructionYard);
+        for (var player = 0; player < players.Length; player++)
+        {
+            simulation.PlaceStructure(player, yard, DuelMap.StartOrigin(player));
+            sources.Add(new ScriptedSkirmishAi(player, spec.Seed));
+        }
+
+        return simulation;
+    }
 
     private void SpawnStartingUnits()
     {
