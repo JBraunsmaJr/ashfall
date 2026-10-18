@@ -7,6 +7,7 @@ namespace Ashfall.Content;
 /// <param name="AcquisitionRange">How far an idle unit looks for enemies to engage, in cells.</param>
 /// <param name="ProducedBy">The structure role that trains this unit.</param>
 /// <param name="HarvestCapacity">Cindrite a harvester carries per trip; 0 for units that cannot harvest.</param>
+/// <param name="Sight">How far the unit reveals the fog of war, in cells.</param>
 public sealed record UnitDefinition(
     string Id,
     string Name,
@@ -18,7 +19,8 @@ public sealed record UnitDefinition(
     WeaponDefinition? Weapon,
     Fix64 AcquisitionRange,
     StructureRole ProducedBy,
-    int HarvestCapacity = 0)
+    int HarvestCapacity = 0,
+    int Sight = 6)
 {
     public bool IsHarvester => HarvestCapacity > 0;
 

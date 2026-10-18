@@ -30,7 +30,8 @@ public sealed class HeadlessMatch : IAsyncDisposable
         Clock = new SessionClock(speed, timeProvider);
         if (spec.Mode == MatchMode.Skirmish)
         {
-            Simulation = CreateSkirmish(spec, _sources);
+            Simulation = CreateSkirmish(spec, _sources, out var localPlayer);
+            LocalPlayer = localPlayer;
             return;
         }
 
@@ -51,6 +52,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
     public GameSimulation Simulation { get; }
 
     public SessionClock Clock { get; }
+
+    /// <summary>The human player's command queue, or null when every side is an AI.</summary>
+    public LocalOrders? LocalPlayer { get; }
 
     public long Tick => Simulation.Tick;
 
@@ -159,8 +163,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
     public Task<MatchResult> RunToCompletionAsync(long maxTicks, CancellationToken cancellationToken = default) =>
         RunUntilAsync(static match => match.IsOver, maxTicks, cancellationToken);
 
-    private static GameSimulation CreateSkirmish(MatchSpec spec, List<ICommandSource> sources)
+    private static GameSimulation CreateSkirmish(MatchSpec spec, List<ICommandSource> sources, out LocalOrders? localPlayer)
     {
+        localPlayer = null;
         var content = GameContent.Standard;
         PlayerSetup[] players = [new(Team: 0, BulwarkContent.FactionId), new(Team: 1, BulwarkContent.FactionId)];
         var simulation = new GameSimulation(spec.Seed, DuelMap.Create(), content, players);
@@ -168,7 +173,19 @@ public sealed class HeadlessMatch : IAsyncDisposable
         for (var player = 0; player < players.Length; player++)
         {
             simulation.PlaceStructure(player, yard, DuelMap.StartOrigin(player));
-            sources.Add(new ScriptedSkirmishAi(player, spec.Seed));
+            switch (spec.Controllers[player])
+            {
+                case PlayerController.ScriptedAi:
+                    sources.Add(new ScriptedSkirmishAi(player, spec.Seed));
+                    break;
+                case PlayerController.Human:
+                    localPlayer = new LocalOrders(player);
+                    sources.Add(localPlayer);
+                    break;
+                case PlayerController.IdleAi:
+                default:
+                    break;
+            }
         }
 
         return simulation;

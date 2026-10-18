@@ -19,6 +19,21 @@ public struct ProductionLine
     public readonly int Peek() =>
         Count > 0 ? _slots[0] : throw new InvalidOperationException("The production queue is empty.");
 
+    /// <summary>How many entries in the queue are <paramref name="unitType"/>.</summary>
+    public readonly int CountOf(int unitType)
+    {
+        var count = 0;
+        for (var i = 0; i < Count; i++)
+        {
+            if (_slots[i] == unitType)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     public bool TryEnqueue(int unitType)
     {
         if (IsFull)

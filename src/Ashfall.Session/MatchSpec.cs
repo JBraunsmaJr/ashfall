@@ -33,6 +33,9 @@ public sealed record MatchSpec
 
     public int OrdersPerInterval { get; init; } = 5;
 
+    /// <summary>Skirmish only: who plays each side. Default: two scripted AIs.</summary>
+    public IReadOnlyList<PlayerController> Controllers { get; init; } = [PlayerController.ScriptedAi, PlayerController.ScriptedAi];
+
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
@@ -40,6 +43,33 @@ public sealed record MatchSpec
     public static MatchSpec Skirmish(ulong seed) => new() { Seed = seed, Mode = MatchMode.Skirmish, Map = new MapBounds(DuelMap.Size, DuelMap.Size) };
 
     public MatchSpec WithPlayers(int players) => this with { Players = players };
+
+    /// <summary>Sets who plays <paramref name="player"/> in a skirmish.</summary>
+    public MatchSpec WithController(int player, PlayerController controller)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(player);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(player, Controllers.Count);
+        var controllers = Controllers.ToArray();
+        controllers[player] = controller;
+        return this with { Controllers = controllers };
+    }
+
+    /// <summary>The player seat controlled by a person, or -1 if every side is an AI.</summary>
+    public int HumanPlayer
+    {
+        get
+        {
+            for (var player = 0; player < Controllers.Count; player++)
+            {
+                if (Controllers[player] == PlayerController.Human)
+                {
+                    return player;
+                }
+            }
+
+            return -1;
+        }
+    }
 
     public MatchSpec WithUnitsPerPlayer(int units) => this with { UnitsPerPlayer = units };
 
@@ -55,6 +85,16 @@ public sealed record MatchSpec
         if (Mode == MatchMode.Skirmish && Players != 2)
         {
             throw new ArgumentOutOfRangeException(nameof(Players), Players, "The M1 duel map has exactly two start positions.");
+        }
+
+        if (Mode == MatchMode.Skirmish && Controllers.Count != Players)
+        {
+            throw new ArgumentOutOfRangeException(nameof(Controllers), Controllers.Count, "A skirmish needs one controller per player.");
+        }
+
+        if (Controllers.Count(controller => controller == PlayerController.Human) > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(Controllers), "Only one local human player is supported until multiplayer (M3).");
         }
 
         ArgumentOutOfRangeException.ThrowIfGreaterThan(Players, 8, nameof(Players));

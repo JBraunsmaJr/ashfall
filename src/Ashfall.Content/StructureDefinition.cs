@@ -6,6 +6,7 @@
 /// <param name="Power">Power produced (positive) or consumed (negative) once construction completes.</param>
 /// <param name="Prerequisites">Roles the owner must already have completed before this can be placed.</param>
 /// <param name="FreeUnitId">A unit delivered when construction completes (the refinery's harvester), or null.</param>
+/// <param name="Sight">How far beyond its footprint the structure reveals the fog of war, in cells.</param>
 public sealed record StructureDefinition(
     string Id,
     string Name,
@@ -17,4 +18,5 @@ public sealed record StructureDefinition(
     int Height,
     int Power,
     IReadOnlyList<StructureRole> Prerequisites,
-    string? FreeUnitId = null);
+    string? FreeUnitId = null,
+    int Sight = 4);

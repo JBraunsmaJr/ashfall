@@ -73,8 +73,9 @@ jobs:
           path: TestResults
 
   render-smoke:
-    # Runs the real client: window, Vulkan device, swapchain and 300 cleared frames, on Mesa's software
-    # Vulkan driver (lavapipe) under a virtual X display, with the Khronos validation layer turned on.
+    # Runs the real client: window, Vulkan device, swapchain and the full M2 scene (terrain, units, fog,
+    # lights, sidebar) on Mesa's software Vulkan driver (lavapipe) under a virtual X display, with the
+    # Khronos validation layer turned on. Frames are captured as PNG artifacts for a visual check.
     # libvulkan-dev is deliberately not installed, as on players' machines (see NativeLibraryFallbacks).
     name: Render smoke test (Linux, software Vulkan)
     runs-on: ubuntu-latest
@@ -94,16 +95,37 @@ jobs:
       - name: Build client
         run: dotnet build src/Ashfall.Client -c Release
 
-      - name: Render 300 frames with validation
+      - name: Render 300 frames of a skirmish with validation
         shell: bash
         run: |
           xvfb-run -a -s "-screen 0 1280x720x24" \
-            dotnet run --project src/Ashfall.Client -c Release --no-build -- --frames 300 --validation 2>&1 | tee render.log
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- \
+              --frames 300 --validation --screenshot render-start.png 2>&1 | tee render.log
           if grep -q "Validation Error" render.log; then
             echo "::error::Vulkan validation reported errors (see render.log above)."
             exit 1
           fi
           grep -q "Presented 300 frames" render.log
+
+      - name: Render a battle (autopilot, six game minutes) with validation
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- \
+              --autopilot --speed unthrottled --until-tick 5450 --look-at 18,18 --zoom 2 \
+              --validation --screenshot render-battle.png 2>&1 | tee battle.log
+          if grep -q "Validation Error" battle.log; then
+            echo "::error::Vulkan validation reported errors (see battle.log above)."
+            exit 1
+          fi
+          grep -q "simulation at tick 54" battle.log
+
+      - name: Upload frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-smoke-frames
+          path: render-*.png
 
   cross-platform-determinism:
     # M0/M1 exit gates: the same replays must produce the same hashes on Windows and Linux.

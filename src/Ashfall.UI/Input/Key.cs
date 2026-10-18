@@ -1,0 +1,31 @@
+﻿namespace Ashfall.UI.Input;
+
+/// <summary>The keys the match interface responds to. The client maps window-system keys onto these.</summary>
+public enum Key
+{
+    None,
+    D0,
+    D1,
+    D2,
+    D3,
+    D4,
+    D5,
+    D6,
+    D7,
+    D8,
+    D9,
+    A,
+    G,
+    H,
+    P,
+    S,
+    Escape,
+    Left,
+    Right,
+    Up,
+    Down,
+    Plus,
+    Minus,
+    Shift,
+    Control,
+}

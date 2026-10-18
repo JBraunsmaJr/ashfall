@@ -6,6 +6,7 @@
     <Project Path="src/Ashfall.Session/Ashfall.Session.csproj" />
     <Project Path="src/Ashfall.Headless/Ashfall.Headless.csproj" />
     <Project Path="src/Ashfall.Rendering/Ashfall.Rendering.csproj" />
+    <Project Path="src/Ashfall.UI/Ashfall.UI.csproj" />
     <Project Path="src/Ashfall.Client/Ashfall.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -15,6 +16,7 @@
     <Project Path="tests/Ashfall.Determinism.Tests/Ashfall.Determinism.Tests.csproj" />
     <Project Path="tests/Ashfall.Architecture.Tests/Ashfall.Architecture.Tests.csproj" />
     <Project Path="tests/Ashfall.Rendering.Tests/Ashfall.Rendering.Tests.csproj" />
+    <Project Path="tests/Ashfall.UI.Tests/Ashfall.UI.Tests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
@@ -24,6 +26,7 @@
     <File Path="global.json" />
     <File Path="README.md" />
     <File Path="eng/BannedSymbols.Deterministic.txt" />
+    <File Path="eng/compile-shaders.sh" />
     <File Path=".github/workflows/ci.yml" />
   </Folder>
 </Solution>

@@ -88,6 +88,11 @@ public sealed class GameContent
             {
                 throw new InvalidOperationException($"Unit '{unit.Id}' has a non-positive cost, build time, health or speed.");
             }
+
+            if (unit.Sight < 0)
+            {
+                throw new InvalidOperationException($"Unit '{unit.Id}' has a negative sight range.");
+            }
         }
 
         foreach (var structure in Structures)
@@ -95,6 +100,11 @@ public sealed class GameContent
             if (structure.Width <= 0 || structure.Height <= 0 || structure.Health <= 0)
             {
                 throw new InvalidOperationException($"Structure '{structure.Id}' has an empty footprint or no health.");
+            }
+
+            if (structure.Sight < 0)
+            {
+                throw new InvalidOperationException($"Structure '{structure.Id}' has a negative sight range.");
             }
 
             if (structure.FreeUnitId is not null)

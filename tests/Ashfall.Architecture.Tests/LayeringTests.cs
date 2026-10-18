@@ -8,7 +8,8 @@ namespace Ashfall.Architecture.Tests;
 
 /// <summary>
 /// Enforces the dependency direction from the GDD:
-/// Core ← Content ← Simulation ← Session ← (Client, Headless). The simulation must never see rendering,
+/// Core ← Content ← Simulation ← Session ← UI ← Client, with Session ← Headless and Rendering ← UI.
+/// The simulation must never see rendering,
 /// audio, UI, networking or BRUTAL, so the headless runner exercises exactly what players run.
 /// </summary>
 public class LayeringTests
@@ -17,6 +18,8 @@ public class LayeringTests
     private static readonly Assembly ContentAssembly = typeof(GameContent).Assembly;
     private static readonly Assembly Simulation = typeof(GameSimulation).Assembly;
     private static readonly Assembly Session = typeof(HeadlessMatch).Assembly;
+    private static readonly Assembly Interface = typeof(Ashfall.UI.GameScreen).Assembly;
+    private static readonly Assembly Renderer = typeof(Ashfall.Rendering.VulkanRenderer).Assembly;
 
     [Fact]
     public void Core_depends_on_nothing_but_the_runtime()
@@ -43,6 +46,23 @@ public class LayeringTests
     {
         string[] expected = ["Ashfall.Content", "Ashfall.Core", "Ashfall.Simulation"];
         Assert.Equal(expected, NonRuntimeReferences(Session));
+    }
+
+    [Fact]
+    public void The_interface_reads_the_game_and_feeds_the_renderer_but_never_touches_the_window_system()
+    {
+        var references = NonRuntimeReferences(Interface);
+
+        Assert.Contains("Ashfall.Session", references);
+        Assert.Contains("Ashfall.Rendering", references);
+        Assert.DoesNotContain(references, name => name.StartsWith("Brutal.Glfw", StringComparison.Ordinal));
+        Assert.DoesNotContain(references, name => name.StartsWith("Brutal.Vulkan", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_renderer_knows_nothing_of_the_game()
+    {
+        Assert.DoesNotContain(NonRuntimeReferences(Renderer), name => name.StartsWith("Ashfall", StringComparison.Ordinal));
     }
 
     private static string[] NonRuntimeReferences(Assembly assembly) =>

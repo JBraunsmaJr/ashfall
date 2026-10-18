@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The game client: composition root for the session, renderer, audio and UI. M0: a BRUTAL/GLFW window, cleared by the Vulkan renderer, driving a real-time proving-ground match.</Description>
+    <Description>The game client: composition root for the session, renderer, audio and UI. M2: a playable skirmish against the scripted or idle AI, rendered by the Vulkan renderer through the UI layer.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <OutputType>Exe</OutputType>
     <AssemblyName>ashfall</AssemblyName>
@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Ashfall.Session\Ashfall.Session.csproj" />
     <ProjectReference Include="..\Ashfall.Rendering\Ashfall.Rendering.csproj" />
+    <ProjectReference Include="..\Ashfall.UI\Ashfall.UI.csproj" />
   </ItemGroup>
 
 </Project>

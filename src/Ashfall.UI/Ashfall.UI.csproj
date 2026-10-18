@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The in-match interface: isometric camera, selection, control groups, orders, the sidebar and minimap, and the scene builder that turns simulation state into lit quads for the renderer. No window or GPU code: input arrives as snapshots, output is a FrameScene, so all of it runs in headless tests.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Session\Ashfall.Session.csproj" />
+    <ProjectReference Include="..\Ashfall.Rendering\Ashfall.Rendering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ashfall.UI.Tests" />
+  </ItemGroup>
+
+</Project>

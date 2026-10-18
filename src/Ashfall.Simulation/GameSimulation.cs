@@ -9,6 +9,7 @@ using Ashfall.Simulation.Orders;
 using Ashfall.Simulation.Players;
 using Ashfall.Simulation.Production;
 using Ashfall.Simulation.Systems;
+using Ashfall.Simulation.Vision;
 
 namespace Ashfall.Simulation;
 
@@ -47,6 +48,7 @@ public sealed class GameSimulation
         Random = new DeterministicRandom(seed);
         World = new World();
         Navigator = new Navigator(map);
+        Visibility = new VisibilityMap(map.Width, map.Height, players.Count);
 
         _players = new PlayerState[players.Count];
         for (var id = 0; id < players.Count; id++)
@@ -78,6 +80,7 @@ public sealed class GameSimulation
             new MovementSystem(),
             new WeaponSystem(),
             new DeathSystem(),
+            new VisionSystem(),
             new VictorySystem(),
         ];
     }
@@ -93,6 +96,9 @@ public sealed class GameSimulation
     public IReadOnlyList<PlayerState> Players => _players;
 
     public Navigator Navigator { get; }
+
+    /// <summary>Every player's fog of war, updated every <see cref="VisionSystem.Period"/> ticks.</summary>
+    public VisibilityMap Visibility { get; }
 
     public bool VictoryEnabled { get; }
 
@@ -333,6 +339,7 @@ public sealed class GameSimulation
         Map.HashInto(ref hasher);
         World.HashInto(ref hasher);
         Navigator.Paths.HashInto(ref hasher);
+        Visibility.HashInto(ref hasher);
         return hasher.Value;
     }
 

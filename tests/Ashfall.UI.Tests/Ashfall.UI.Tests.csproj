@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ashfall.UI\Ashfall.UI.csproj" />
+  </ItemGroup>
+
+</Project>

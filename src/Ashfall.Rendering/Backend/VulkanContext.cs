@@ -213,9 +213,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         var features13 = new VkPhysicalDeviceVulkan13Features();
         var features = new VkPhysicalDeviceFeatures2 { Next = &features13 };
         candidate.GetFeatures2(ref features);
-        if (!features13.DynamicRendering || !features13.Synchronization2)
+        if (!features13.DynamicRendering || !features13.Synchronization2 || !features13.ShaderDemoteToHelperInvocation)
         {
-            return "missing dynamic rendering or synchronization2";
+            return "missing dynamic rendering, synchronization2 or shader demote-to-helper";
         }
 
         var families = new VkQueueFamilyProperties[candidate.GetQueueFamilyProperties_Count()];
@@ -246,6 +246,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             DynamicRendering = true,
             Synchronization2 = true,
+
+            // Slang compiles `discard` to OpDemoteToHelperInvocation (required in every Vulkan 1.3 driver).
+            ShaderDemoteToHelperInvocation = true,
         };
 
         return physicalDevice.CreateDevice(new Device.CreateInfo

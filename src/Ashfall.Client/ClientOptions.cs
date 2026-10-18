@@ -11,22 +11,50 @@ internal sealed record ClientOptions
 
         Usage: ashfall [options]
 
-          --seed <n>        Proving-ground seed (default 20261017)
-          --speed <speed>   Game speed: 1x (default), 4x, 0.5x, unthrottled
-          --frames <n>      Render n frames, then exit (smoke tests and CI)
-          --validation      Enable the Vulkan validation layer (default in Debug builds)
-          --no-validation   Disable it
-          --no-vsync        Present as fast as possible (mailbox or immediate)
-          --size <WxH>      Window size in pixels (default 1280x720)
-          -h, --help        Show this help
+          --seed <n>             Match seed (default 20261017)
+          --opponent <ai>        scripted (default): the M1 AI builds, trains and attacks
+                                 idle: a dummy opponent that never acts (learn the controls)
+          --spectate             Watch two scripted AIs play (no local player, no fog)
+          --autopilot            The scripted AI plays your side too (demos, smoke tests)
+          --speed <speed>        Game speed: 1x (default), 2x, 4x, 0.5x, unthrottled
+          --frames <n>           Render n frames, then exit (smoke tests and CI)
+          --until-tick <n>       Exit once the simulation reaches tick n
+          --screenshot <file>    Save the last frame as a PNG before exiting
+          --look-at <x,y>        Start with the camera over cell (x, y) instead of your base
+          --zoom <step>          Start at zoom step 0 (far), 1 (default) or 2 (near)
+          --validation           Enable the Vulkan validation layer (default in Debug builds)
+          --no-validation        Disable it
+          --no-vsync             Present as fast as possible (mailbox or immediate)
+          --size <WxH>           Window size in pixels (default 1280x720)
+          -h, --help             Show this help
+
+        In game: left-click selects (drag for a box), right-click moves or attacks, A then click
+        attack-moves, S stops, Ctrl+0-9 stores a control group and 0-9 recalls it (twice to jump),
+        arrows / screen edges / middle-drag scroll, mouse wheel zooms, H centres on your base,
+        +/- change speed, P pauses, Esc cancels (and leaves once the match is over).
         """;
 
     public ulong Seed { get; init; } = ProvingGround.DefaultSeed;
+
+    public PlayerController Opponent { get; init; } = PlayerController.ScriptedAi;
+
+    public bool Spectate { get; init; }
+
+    public bool Autopilot { get; init; }
 
     public GameSpeed Speed { get; init; } = GameSpeed.RealTime;
 
     /// <summary>Frames to render before exiting; 0 runs until the window closes.</summary>
     public long Frames { get; init; }
+
+    /// <summary>Simulation tick at which to exit; 0 means no limit.</summary>
+    public long UntilTick { get; init; }
+
+    public string? Screenshot { get; init; }
+
+    public (float X, float Y)? LookAt { get; init; }
+
+    public int Zoom { get; init; } = 1;
 
     public bool Validation { get; init; }
 
@@ -37,6 +65,14 @@ internal sealed record ClientOptions
     public int Height { get; init; } = 720;
 
     public bool ShowHelp { get; init; }
+
+    public MatchSpec ToSpec()
+    {
+        var spec = MatchSpec.Skirmish(Seed);
+        return Spectate
+            ? spec
+            : spec.WithController(0, PlayerController.Human).WithController(1, Opponent);
+    }
 
     public static ClientOptions? Parse(IReadOnlyList<string> args, bool validationByDefault, out string? error)
     {
@@ -58,6 +94,12 @@ internal sealed record ClientOptions
                 case "--no-vsync":
                     options = options with { VSync = false };
                     continue;
+                case "--spectate":
+                    options = options with { Spectate = true };
+                    continue;
+                case "--autopilot":
+                    options = options with { Autopilot = true };
+                    continue;
             }
 
             if (i + 1 >= args.Count)
@@ -72,11 +114,26 @@ internal sealed record ClientOptions
                 case "--seed" when ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seed):
                     options = options with { Seed = seed };
                     break;
+                case "--opponent" when value is "scripted" or "idle":
+                    options = options with { Opponent = value == "idle" ? PlayerController.IdleAi : PlayerController.ScriptedAi };
+                    break;
                 case "--speed" when GameSpeed.TryParse(value, out var speed):
                     options = options with { Speed = speed };
                     break;
                 case "--frames" when long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var frames):
                     options = options with { Frames = frames };
+                    break;
+                case "--until-tick" when long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var tick):
+                    options = options with { UntilTick = tick };
+                    break;
+                case "--screenshot" when value.Length > 0:
+                    options = options with { Screenshot = value };
+                    break;
+                case "--look-at" when TryParsePoint(value, out var point):
+                    options = options with { LookAt = point };
+                    break;
+                case "--zoom" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var zoom) && zoom <= 2:
+                    options = options with { Zoom = zoom };
                     break;
                 case "--size" when TryParseSize(value, out var width, out var height):
                     options = options with { Width = width, Height = height };
@@ -90,6 +147,21 @@ internal sealed record ClientOptions
         return options;
     }
 
+    private static bool TryParsePoint(string text, out (float X, float Y) point)
+    {
+        point = default;
+        var parts = text.Split(',');
+        if (parts.Length != 2
+            || !float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+            || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y))
+        {
+            return false;
+        }
+
+        point = (x, y);
+        return true;
+    }
+
     private static bool TryParseSize(string text, out int width, out int height)
     {
         width = height = 0;
@@ -97,6 +169,6 @@ internal sealed record ClientOptions
         return parts.Length == 2
             && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out width)
             && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out height)
-            && width >= 64 && height >= 64;
+            && width >= 640 && height >= 480;
     }
 }

@@ -27,6 +27,9 @@ public record struct Producer : IStateHashable
     /// <summary>The unit type being built now.</summary>
     public readonly int Current => _line.Peek();
 
+    /// <summary>How many of <paramref name="unitType"/> are queued, including the one being built.</summary>
+    public readonly int CountOf(int unitType) => _line.CountOf(unitType);
+
     public bool TryEnqueue(int unitType) => _line.TryEnqueue(unitType);
 
     public int Dequeue() => _line.Dequeue();

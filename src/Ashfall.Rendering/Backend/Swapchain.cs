@@ -69,7 +69,7 @@ internal sealed unsafe class Swapchain : IDisposable
                 ImageColorSpace = format.ColorSpace,
                 ImageExtent = extent,
                 ImageArrayLayers = 1,
-                ImageUsage = VkImageUsageFlags.ColorAttachmentBit | VkImageUsageFlags.TransferDstBit,
+                ImageUsage = Usage(capabilities),
                 ImageSharingMode = VkSharingMode.Exclusive,
                 PreTransform = capabilities.CurrentTransform,
                 CompositeAlpha = ChooseCompositeAlpha(capabilities.SupportedCompositeAlpha),
@@ -103,8 +103,14 @@ internal sealed unsafe class Swapchain : IDisposable
                 null);
         }
 
-        return new Swapchain(context.Device, handle, format, presentMode, extent, images, views);
+        return new Swapchain(context.Device, handle, format, presentMode, extent, images, views)
+        {
+            SupportsCapture = capabilities.SupportedUsageFlags.HasFlag(VkImageUsageFlags.TransferSrcBit),
+        };
     }
+
+    /// <summary>True when images can be copied out (screenshots, CI frame captures).</summary>
+    public bool SupportsCapture { get; private init; }
 
     /// <summary>The whole colour aspect of a single-mip, single-layer image.</summary>
     public static VkImageSubresourceRange ColorSubresource => new()
@@ -124,6 +130,15 @@ internal sealed unsafe class Swapchain : IDisposable
         }
 
         _device.DestroySwapchainKHR(Handle, null);
+    }
+
+    // Colour attachment always; transfer source too where supported, so frames can be read back.
+    private static VkImageUsageFlags Usage(VkSurfaceCapabilitiesKHR capabilities)
+    {
+        var usage = VkImageUsageFlags.ColorAttachmentBit | VkImageUsageFlags.TransferDstBit;
+        return capabilities.SupportedUsageFlags.HasFlag(VkImageUsageFlags.TransferSrcBit)
+            ? usage | VkImageUsageFlags.TransferSrcBit
+            : usage;
     }
 
     private static VkExtent2D ChooseExtent(VkSurfaceCapabilitiesKHR capabilities, PixelSize framebufferSize)

@@ -34,19 +34,19 @@ public static class BulwarkContent
         UnitDefinition[] units =
         [
             new(Rifleman, "Rifleman", Cost: 150, BuildTicks: 90, Health: 125, ArmorType.None, infantrySpeed, rifle,
-                AcquisitionRange: Fix64.FromInt(6), StructureRole.Barracks),
+                AcquisitionRange: Fix64.FromInt(6), StructureRole.Barracks, Sight: 6),
             new(Rocketeer, "Rocketeer", Cost: 300, BuildTicks: 120, Health: 100, ArmorType.None, infantrySpeed, rocket,
-                AcquisitionRange: Fix64.FromInt(7), StructureRole.Barracks),
+                AcquisitionRange: Fix64.FromInt(7), StructureRole.Barracks, Sight: 7),
             new(Warden, "Warden light tank", Cost: 700, BuildTicks: 150, Health: 450, ArmorType.Light, tankSpeed, cannon,
-                AcquisitionRange: Fix64.FromInt(7), StructureRole.Factory),
+                AcquisitionRange: Fix64.FromInt(7), StructureRole.Factory, Sight: 7),
             new(Harvester, "Harvester", Cost: 1_400, BuildTicks: 210, Health: 700, ArmorType.Heavy, infantrySpeed, Weapon: null,
-                AcquisitionRange: Fix64.Zero, StructureRole.Factory, HarvestCapacity: 700),
+                AcquisitionRange: Fix64.Zero, StructureRole.Factory, HarvestCapacity: 700, Sight: 4),
         ];
 
         StructureDefinition[] structures =
         [
             new(ConstructionYard, "Construction Yard", StructureRole.ConstructionYard, Cost: 5_000, BuildTicks: 600, Health: 1_500,
-                Width: 3, Height: 3, Power: 0, Prerequisites: []),
+                Width: 3, Height: 3, Power: 0, Prerequisites: [], Sight: 6),
             new(PowerPlant, "Power Plant", StructureRole.PowerPlant, Cost: 300, BuildTicks: 150, Health: 500,
                 Width: 2, Height: 2, Power: 100, Prerequisites: []),
             new(Refinery, "Refinery", StructureRole.Refinery, Cost: 2_000, BuildTicks: 300, Health: 900,
