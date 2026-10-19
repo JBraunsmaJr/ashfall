@@ -44,7 +44,13 @@ public sealed class ProductionSystem : ISystem
 
         foreach (var (structure, unitType) in _finished)
         {
-            context.Simulation.SpawnUnitAt(context.World.EntityAt(structure), unitType);
+            var producer = context.World.EntityAt(structure);
+            var unit = context.Simulation.SpawnUnitAt(producer, unitType);
+            var rally = context.World.Get<Producer>(producer);
+            if (rally.HasRally)
+            {
+                context.Simulation.SendTo(unit, rally.Rally);
+            }
         }
     }
 }

@@ -5,8 +5,8 @@ using Ashfall.Simulation.Production;
 namespace Ashfall.Simulation.Components;
 
 /// <summary>
-/// A structure's unit queue (up to <see cref="ProductionLine.Capacity"/> unit types, paid for when queued)
-/// and the ticks left on the unit at its head.
+/// A structure's unit queue (up to <see cref="ProductionLine.Capacity"/> unit types, paid for when queued),
+/// the ticks left on the unit at its head, and its rally point.
 /// </summary>
 /// <remarks>
 /// The queue is a private field changed only through these methods: a struct exposed as a property would
@@ -17,6 +17,12 @@ public record struct Producer : IStateHashable
     private ProductionLine _line;
 
     public int Remaining { get; set; }
+
+    /// <summary>Where new units go once they are out (valid while <see cref="HasRally"/>).</summary>
+    public FixVec2 Rally { get; set; }
+
+    /// <summary>Whether a rally point is set; without one, new units wait at the door.</summary>
+    public bool HasRally { get; set; }
 
     public readonly int QueueCount => _line.Count;
 
@@ -38,5 +44,9 @@ public record struct Producer : IStateHashable
     {
         _line.AddTo(ref hasher);
         hasher.Add(Remaining);
+        if (HasRally)
+        {
+            hasher.Add(Rally);
+        }
     }
 }

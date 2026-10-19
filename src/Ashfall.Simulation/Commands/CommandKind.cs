@@ -25,4 +25,7 @@ public enum CommandKind : byte
 
     /// <summary>Set an armed unit's <see cref="Orders.UnitStance"/> (in <see cref="Command.TypeIndex"/>).</summary>
     SetStance = 7,
+
+    /// <summary>Set a production structure's rally point (<see cref="Command.Target"/>), where its new units go.</summary>
+    SetRally = 8,
 }

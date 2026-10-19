@@ -3,6 +3,7 @@ using Ashfall.Core;
 using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Map;
+using Ashfall.Simulation.Orders;
 using static Ashfall.Simulation.Tests.TestMatch;
 
 namespace Ashfall.Simulation.Tests;
@@ -156,6 +157,34 @@ public class EconomyTests
     }
 
     [Fact]
+    public void New_units_walk_to_their_producers_rally_point()
+    {
+        var sim = WithYard();
+        sim.PlaceStructure(0, PowerPlant, new Cell(6, 2));
+        var barracks = sim.PlaceStructure(0, Barracks, new Cell(10, 2));
+        var rally = new Cell(20, 20).Center;
+        Run(sim, 1, Command.SetRally(0, barracks, rally), Command.Train(0, barracks, Unit(BulwarkContent.Rifleman)));
+        Assert.True(sim.World.Get<Producer>(barracks).HasRally);
+
+        RunUntil(sim, s => CountUnits(s, 0, BulwarkContent.Rifleman) == 1, 200);
+        var rifleman = sim.World.EntityAt(sim.World.Store<UnitInfo>().EntityIndices.ToArray()
+            .First(index => sim.World.Store<UnitInfo>().Get(index).UnitType == Unit(BulwarkContent.Rifleman)));
+        RunUntil(sim, s => s.World.Get<UnitOrder>(rifleman).Kind == OrderKind.Idle, 400);
+        Assert.Equal(rally, PositionOf(sim, rifleman));
+    }
+
+    [Fact]
+    public void Only_the_owner_can_set_a_rally_point_and_only_on_a_producer()
+    {
+        var sim = WithYard();
+        var barracks = sim.PlaceStructure(0, Barracks, new Cell(10, 2));
+        var plant = sim.PlaceStructure(0, PowerPlant, new Cell(6, 2));
+        Run(sim, 1, Command.SetRally(1, barracks, new Cell(5, 5).Center), Command.SetRally(0, plant, new Cell(5, 5).Center));
+        Assert.Equal(2, sim.RejectedCommands);
+        Assert.False(sim.World.Get<Producer>(barracks).HasRally);
+    }
+
+    [Fact]
     public void A_refinery_comes_with_a_harvester()
     {
         var sim = WithYard();
@@ -164,6 +193,44 @@ public class EconomyTests
         Run(sim, sim.Content.Structure(Refinery).BuildTicks + 1, Command.Build(0, Refinery, new Cell(2, 7)));
 
         Assert.Equal(1, CountUnits(sim, 0, BulwarkContent.Harvester));
+    }
+
+    [Fact]
+    public void Harvesters_spread_over_a_field_instead_of_queueing_on_one_cell()
+    {
+        var map = new GridMap(32, 32);
+        for (var x = 14; x < 18; x++)
+        {
+            for (var y = 2; y < 6; y++)
+            {
+                map.SetCindrite(new Cell(x, y), 300);
+            }
+        }
+
+        var sim = WithYard(map: map);
+        sim.PlaceStructure(0, PowerPlant, new Cell(6, 2));
+        var refinery = sim.PlaceStructure(0, Refinery, new Cell(9, 2));
+        var harvesters = Enumerable.Range(0, 5).Select(_ => sim.SpawnUnitAt(refinery, Unit(BulwarkContent.Harvester))).ToArray();
+        Run(sim, 60);
+
+        var fields = harvesters.Select(unit => sim.World.Get<Harvester>(unit)).Where(h => h.State is HarvestState.MovingToField or HarvestState.Harvesting)
+            .Select(h => h.Field).ToArray();
+        Assert.Equal(5, fields.Length);
+        Assert.Equal(5, fields.Distinct().Count());
+    }
+
+    [Fact]
+    public void Harvesters_share_a_cell_only_when_nothing_else_is_left()
+    {
+        var map = new GridMap(32, 32);
+        map.SetCindrite(new Cell(16, 3), 300);
+        var sim = WithYard(map: map);
+        sim.PlaceStructure(0, PowerPlant, new Cell(6, 2));
+        var refinery = sim.PlaceStructure(0, Refinery, new Cell(9, 2));
+        var harvesters = Enumerable.Range(0, 2).Select(_ => sim.SpawnUnitAt(refinery, Unit(BulwarkContent.Harvester))).ToArray();
+        Run(sim, 30);
+
+        Assert.All(harvesters, unit => Assert.Equal(new Cell(16, 3), sim.World.Get<Harvester>(unit).Field));
     }
 
     [Fact]

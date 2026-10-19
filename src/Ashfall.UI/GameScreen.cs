@@ -629,6 +629,23 @@ public sealed class GameScreen
 
     private void IssueMove(Vector2 target, bool attackMove)
     {
+        // Selected barracks and factories take the click as their rally point.
+        var rallied = false;
+        foreach (var entity in _selection)
+        {
+            if (Simulation.World.IsAlive(entity) && Simulation.World.Has<Producer>(entity))
+            {
+                _orders!.Enqueue(Command.SetRally(Player, entity, new Core.FixVec2(ToFix(target.X), ToFix(target.Y))));
+                rallied = true;
+            }
+        }
+
+        if (rallied)
+        {
+            Say("RALLY POINT SET", Palette.Text);
+            _effects.Marker(target, attack: false, _now);
+        }
+
         _scratch.Clear();
         _scratch.AddRange(MovableSelection());
         if (_scratch.Count == 0)
@@ -885,6 +902,23 @@ public sealed class GameScreen
     private void DrawOverlays(Canvas canvas, float alpha)
     {
         var world = Simulation.World;
+
+        // Rally points of the selected producers: a line from the door to a flag.
+        foreach (var entity in _selection)
+        {
+            if (!world.IsAlive(entity) || !world.Has<Producer>(entity) || world.Get<Producer>(entity) is not { HasRally: true } producer)
+            {
+                continue;
+            }
+
+            var door = Simulation.ExitCell(world.Get<StructureInfo>(entity));
+            var from = Camera.WorldToScreen(new Vector3(door.X + 0.5f, door.Y + 0.5f, GroundHeight(new Vector2(door.X + 0.5f, door.Y + 0.5f))));
+            var rally = MotionTracker.ToVector(producer.Rally);
+            var to = Camera.WorldToScreen(new Vector3(rally, GroundHeight(rally)));
+            canvas.Line(from, to, 1.5f, Palette.WithAlpha(Palette.Selection, 0.6f));
+            canvas.Line(to, to - new Vector2(0, 18), 2f, Palette.Text);
+            canvas.Rect(to.X, to.Y - 18, 10, 6, Palette.Player(Player));
+        }
 
         // Health bars over selected and damaged units and structures, and damaged behemoths (not chaff: a wave would
         // be a wall of bars).

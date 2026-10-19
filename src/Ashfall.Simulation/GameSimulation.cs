@@ -513,6 +513,7 @@ public sealed class GameSimulation
         CommandKind.Build => ApplyBuild(command),
         CommandKind.Train => ApplyTrain(command),
         CommandKind.SetStance => ApplySetStance(command),
+        CommandKind.SetRally => ApplySetRally(command),
         CommandKind.None => false,
         _ => false,
     };
@@ -530,14 +531,7 @@ public sealed class GameSimulation
             return false;
         }
 
-        SetOrder(command.Unit, new UnitOrder(OrderKind.Move, Entity.None, command.Target));
-        if (World.Has<Harvester>(command.Unit))
-        {
-            World.Get<Harvester>(command.Unit).State = HarvestState.Idle;
-        }
-
-        ref var mover = ref World.Get<Mover>(command.Unit);
-        Navigator.PlanRoute(command.Unit.Index, World.Get<Position>(command.Unit).Value, command.Target, ref mover);
+        SendTo(command.Unit, command.Target);
         return true;
     }
 
@@ -655,6 +649,34 @@ public sealed class GameSimulation
             armament.Guarding = false;
             armament.Returning = false;
         }
+    }
+
+    /// <summary>Orders a unit to walk to <paramref name="point"/>, as a Move command would (rally points use it).</summary>
+    public void SendTo(Entity unit, FixVec2 point)
+    {
+        SetOrder(unit, new UnitOrder(OrderKind.Move, Entity.None, point));
+        if (World.Has<Harvester>(unit))
+        {
+            World.Get<Harvester>(unit).State = HarvestState.Idle;
+        }
+
+        ref var mover = ref World.Get<Mover>(unit);
+        Navigator.PlanRoute(unit.Index, World.Get<Position>(unit).Value, point, ref mover);
+    }
+
+    private bool ApplySetRally(in Command command)
+    {
+        if (!World.IsAlive(command.Unit)
+            || !World.Has<Producer>(command.Unit)
+            || World.Get<Owner>(command.Unit).PlayerId != command.PlayerId)
+        {
+            return false;
+        }
+
+        ref var producer = ref World.Get<Producer>(command.Unit);
+        producer.Rally = Bounds.Clamp(command.Target);
+        producer.HasRally = true;
+        return true;
     }
 
     private bool ApplySetStance(in Command command)

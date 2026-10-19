@@ -10,7 +10,9 @@ namespace Ashfall.Simulation.Systems;
 /// <summary>
 /// Runs every harvester's loop: find Cindrite, drive there, harvest until full or the cell is empty,
 /// drive to the nearest refinery, unload into the owner's credits, repeat. A harvester that has been
-/// given a Move order pauses the loop until it arrives.
+/// given a Move order pauses the loop until it arrives. A cell another harvester is driving to or working is
+/// taken: harvesters spread over a field instead of queueing on one cell (they share only when nothing else
+/// is left).
 /// </summary>
 public sealed class HarvestSystem : ISystem
 {
@@ -20,11 +22,32 @@ public sealed class HarvestSystem : ISystem
     // Squared distance (in cells) from the dock at which unloading may begin.
     private static readonly Fix64 DockReachSquared = Fix64.FromRatio(9, 4);
 
+    // Cells a harvester is driving to or working this tick (derived from harvester state every tick).
+    private bool[] _claimed = [];
+
     public void Update(in TickContext context)
     {
         var harvesters = context.World.Store<Harvester>();
         var indices = harvesters.EntityIndices;
         var states = harvesters.Components;
+        var map = context.Map;
+        if (_claimed.Length != map.Width * map.Height)
+        {
+            _claimed = new bool[map.Width * map.Height];
+        }
+        else
+        {
+            Array.Clear(_claimed);
+        }
+
+        foreach (var harvester in states)
+        {
+            if (harvester.State is HarvestState.MovingToField or HarvestState.Harvesting && map.InBounds(harvester.Field))
+            {
+                _claimed[map.IndexOf(harvester.Field)] = true;
+            }
+        }
+
         for (var i = 0; i < states.Length; i++)
         {
             var unit = context.World.EntityAt(indices[i]);
@@ -44,7 +67,7 @@ public sealed class HarvestSystem : ISystem
         }
     }
 
-    private static void Run(in TickContext context, Entity unit, ref Harvester harvester, ref Mover mover)
+    private void Run(in TickContext context, Entity unit, ref Harvester harvester, ref Mover mover)
     {
         var world = context.World;
         var position = world.Get<Position>(unit).Value;
@@ -61,6 +84,7 @@ public sealed class HarvestSystem : ISystem
                 else if (context.IsStaggeredTick(unit.Index, 8) && TryFindField(context, harvester, position, out var field))
                 {
                     harvester.Field = field;
+                    _claimed[context.Map.IndexOf(field)] = true;
                     harvester.State = HarvestState.MovingToField;
                     context.Navigator.PlanRoute(unit.Index, position, field.Center, ref mover);
                 }
@@ -198,7 +222,8 @@ public sealed class HarvestSystem : ISystem
         return best;
     }
 
-    private static bool TryFindField(in TickContext context, in Harvester harvester, FixVec2 position, out Cell field)
+    // A free cell near the last field, then a free cell anywhere, then (everything taken) any cell with Cindrite.
+    private bool TryFindField(in TickContext context, in Harvester harvester, FixVec2 position, out Cell field)
     {
         var map = context.Map;
         if (map.TotalCindrite == 0)
@@ -207,17 +232,19 @@ public sealed class HarvestSystem : ISystem
             return false;
         }
 
-        if (map.InBounds(harvester.Field) && TryFindCindrite(map, harvester.Field, LocalSearchRadius, out field))
+        if (map.InBounds(harvester.Field) && TryFindCindrite(map, harvester.Field, LocalSearchRadius, _claimed, out field))
         {
             return true;
         }
 
         var maxRadius = map.Width > map.Height ? map.Width : map.Height;
-        return TryFindCindrite(map, Cell.Containing(position), maxRadius, out field);
+        return TryFindCindrite(map, Cell.Containing(position), maxRadius, _claimed, out field)
+            || TryFindCindrite(map, Cell.Containing(position), maxRadius, null, out field);
     }
 
-    // Ring search outward; within the first ring that has any, the closest cell wins (scan order breaks ties).
-    private static bool TryFindCindrite(GridMap map, Cell around, int maxRadius, out Cell found)
+    // Ring search outward over cells not taken; within the first ring that has any, the closest cell wins (scan order
+    // breaks ties).
+    private static bool TryFindCindrite(GridMap map, Cell around, int maxRadius, bool[]? taken, out Cell found)
     {
         for (var radius = 0; radius <= maxRadius; radius++)
         {
@@ -234,7 +261,8 @@ public sealed class HarvestSystem : ISystem
 
                     var cell = new Cell(around.X + dx, around.Y + dy);
                     var distance = (dx * dx) + (dy * dy);
-                    if (distance < bestDistance && map.CindriteAt(cell) > 0 && map.IsPassable(cell))
+                    if (distance < bestDistance && map.CindriteAt(cell) > 0 && map.IsPassable(cell)
+                        && (taken is null || !taken[map.IndexOf(cell)]))
                     {
                         bestDistance = distance;
                         found = cell;

@@ -41,6 +41,9 @@ public readonly record struct Command(
     public static Command Train(int playerId, Entity producer, int unitType) =>
         new(playerId, CommandKind.Train, producer, FixVec2.Zero, Entity.None, unitType, default);
 
+    public static Command SetRally(int playerId, Entity producer, FixVec2 point) =>
+        new(playerId, CommandKind.SetRally, producer, point, Entity.None, -1, default);
+
     public static Command SetStance(int playerId, Entity unit, Orders.UnitStance stance) =>
         new(playerId, CommandKind.SetStance, unit, FixVec2.Zero, Entity.None, (int)stance, default);
 }
