@@ -7,16 +7,28 @@ namespace Ashfall.Simulation.Systems;
 
 /// <summary>
 /// Decides what every armed unit is shooting at and where it needs to be:
-/// keeps explicit Attack targets, lets idle and attack-moving units pick the nearest enemy in
-/// acquisition range (units and creatures before structures, and a structure they picked is dropped
-/// when a unit or creature comes into range), closes to weapon range, and resumes an attack-move when
-/// its target dies.
+/// keeps explicit Attack targets; lets idle and attack-moving units pick the nearest enemy in acquisition range
+/// (units and creatures before structures, and a structure they picked is dropped when a unit or creature comes into
+/// range); turns an idle unit on whoever shoots it; closes to weapon range; and resumes an attack-move when its
+/// target dies. A unit whose move has arrived is idle again.
 /// </summary>
+/// <remarks>
+/// An idle unit's <see cref="UnitStance"/> sets how far it goes on its own: <see cref="UnitStance.Guard"/> chases a
+/// short way (<see cref="GuardLeash"/> beyond its acquisition range from where it stood) and walks back,
+/// <see cref="UnitStance.HoldGround"/> never moves and only fires at what is in weapon range, and
+/// <see cref="UnitStance.Free"/> pursues anywhere. Attack orders and attack-moves always pursue.
+/// </remarks>
 public sealed class TargetingSystem : ISystem
 {
+    /// <summary>Guard stance: how much further than its acquisition range a unit chases from where it stood.</summary>
+    public static readonly Fix64 GuardLeash = Fix64.FromInt(2);
+
     // Ticks between target scans and chase re-plans for one unit (staggered across units).
-    private const int ScanPeriod = 8;
+    private const int ScanPeriod = 4;
     private const int ChasePeriod = 10;
+
+    // A guard counts as back at its post this close to it.
+    private static readonly Fix64 AtPostSquared = Fix64.FromRatio(1, 4);
 
     // Scratch for target scans: enemies within range, sorted back into Health-store order.
     private readonly List<Candidate> _candidates = [];
@@ -38,6 +50,12 @@ public sealed class TargetingSystem : ISystem
             var definition = context.Content.Unit(world.Get<UnitInfo>(unit).UnitType);
             var owner = world.Get<Owner>(unit).PlayerId;
 
+            // A move that has arrived (or cannot go on) leaves the unit idle, watching for enemies again.
+            if (order.Kind == OrderKind.Move && !mover.HasTarget)
+            {
+                order = UnitOrder.Idle;
+            }
+
             if (!IsValidTarget(context, owner, armament.Target))
             {
                 armament.Target = Entity.None;
@@ -53,25 +71,95 @@ public sealed class TargetingSystem : ISystem
                 armament.Target = order.Target;
             }
 
-            if (order.Kind is OrderKind.Idle or OrderKind.AttackMove
-                && context.IsStaggeredTick(unit.Index, ScanPeriod)
-                && (armament.Target.IsNone || world.Has<StructureInfo>(armament.Target)))
+            var weapon = definition.Weapon!;
+            var onItsOwn = order.Kind is OrderKind.Idle or OrderKind.AttackMove;
+            var stance = order.Kind == OrderKind.AttackMove ? UnitStance.Free : armament.Stance;
+            var reach = stance == UnitStance.HoldGround ? weapon.Range : definition.AcquisitionRange;
+            ref var health = ref world.Get<Health>(unit);
+            if (onItsOwn && !armament.Returning)
             {
-                // A building it picked for itself is dropped as soon as something that fights back comes into range.
-                var found = FindNearestEnemy(context, _candidates, owner, position, definition.AcquisitionRange, structures: armament.Target.IsNone);
-                if (!found.IsNone || armament.Target.IsNone)
+                // Shot at: answer the attacker if it is something that fights back and the stance lets the unit reach it.
+                var attacker = health.LastAttacker;
+                if ((armament.Target.IsNone || world.Has<StructureInfo>(armament.Target))
+                    && IsValidTarget(context, owner, attacker) && !world.Has<StructureInfo>(attacker)
+                    && (stance != UnitStance.HoldGround || InRange(position, world.Get<Position>(attacker).Value, weapon.Range)))
                 {
-                    armament.Target = found;
+                    armament.Target = attacker;
+                }
+
+                if (context.IsStaggeredTick(unit.Index, ScanPeriod) && (armament.Target.IsNone || world.Has<StructureInfo>(armament.Target)))
+                {
+                    // A building it picked for itself is dropped as soon as something that fights back comes into range.
+                    var found = FindNearestEnemy(context, _candidates, owner, position, reach, structures: armament.Target.IsNone);
+                    if (!found.IsNone || armament.Target.IsNone)
+                    {
+                        armament.Target = found;
+                    }
+                }
+            }
+
+            health.LastAttacker = Entity.None;
+
+            // Guard: remember the post when leaving it to fight, and give up a chase that strays too far from it.
+            if (order.Kind == OrderKind.Idle && stance == UnitStance.Guard && !armament.Target.IsNone)
+            {
+                if (!armament.Guarding)
+                {
+                    armament.Guarding = true;
+                    armament.GuardPoint = position;
+                }
+                else if (!InRange(armament.GuardPoint, position, definition.AcquisitionRange + GuardLeash))
+                {
+                    armament.Target = Entity.None;
+                    armament.Returning = true;
+                    context.Navigator.PlanRoute(unit.Index, position, armament.GuardPoint, ref mover);
                 }
             }
 
             if (!armament.Target.IsNone)
             {
-                Engage(context, unit, armament.Target, position, definition.Weapon!.Range, ref mover);
+                if (stance == UnitStance.HoldGround && order.Kind == OrderKind.Idle)
+                {
+                    // Holding ground: fire at what is in range, never chase.
+                    if (!InRange(position, context.Simulation.ClosestPointOf(armament.Target, position), weapon.Range))
+                    {
+                        armament.Target = Entity.None;
+                    }
+                }
+                else
+                {
+                    Engage(context, unit, armament.Target, position, weapon.Range, ref mover);
+                }
             }
             else if (order.Kind == OrderKind.AttackMove && !mover.HasTarget)
             {
                 ContinueAttackMove(context, unit, position, ref order, ref mover);
+            }
+            else if (order.Kind == OrderKind.Idle && armament.Guarding)
+            {
+                ReturnToPost(context, unit, position, ref armament, ref mover);
+            }
+        }
+    }
+
+    // A guard with nothing left to fight walks back to its post; once there it is at rest again.
+    private static void ReturnToPost(in TickContext context, Entity unit, FixVec2 position, ref Armament armament, ref Mover mover)
+    {
+        if (FixVec2.DistanceSquared(position, armament.GuardPoint) <= AtPostSquared)
+        {
+            armament.Guarding = false;
+            armament.Returning = false;
+            mover.HasTarget = false;
+            return;
+        }
+
+        if (!mover.HasTarget || !armament.Returning)
+        {
+            armament.Returning = true;
+            if (!context.Navigator.PlanRoute(unit.Index, position, armament.GuardPoint, ref mover))
+            {
+                armament.Guarding = false; // the post cannot be reached any more: this is the post now
+                armament.Returning = false;
             }
         }
     }

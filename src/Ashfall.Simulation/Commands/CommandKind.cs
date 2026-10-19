@@ -22,4 +22,7 @@ public enum CommandKind : byte
 
     /// <summary>Queue a unit at a production structure.</summary>
     Train = 6,
+
+    /// <summary>Set an armed unit's <see cref="Orders.UnitStance"/> (in <see cref="Command.TypeIndex"/>).</summary>
+    SetStance = 7,
 }

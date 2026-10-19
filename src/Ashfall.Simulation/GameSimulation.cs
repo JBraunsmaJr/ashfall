@@ -512,6 +512,7 @@ public sealed class GameSimulation
         CommandKind.AttackMove => ApplyAttackMove(command),
         CommandKind.Build => ApplyBuild(command),
         CommandKind.Train => ApplyTrain(command),
+        CommandKind.SetStance => ApplySetStance(command),
         CommandKind.None => false,
         _ => false,
     };
@@ -640,12 +641,33 @@ public sealed class GameSimulation
         return true;
     }
 
+    // A new order from the player: whatever post the unit was guarding, it is wherever it is told to be now.
     private void SetOrder(Entity unit, UnitOrder order)
     {
         if (World.Has<UnitOrder>(unit))
         {
             World.Get<UnitOrder>(unit) = order;
         }
+
+        if (World.Has<Armament>(unit))
+        {
+            ref var armament = ref World.Get<Armament>(unit);
+            armament.Guarding = false;
+            armament.Returning = false;
+        }
+    }
+
+    private bool ApplySetStance(in Command command)
+    {
+        var stance = (UnitStance)command.TypeIndex;
+        if (!OwnsLiveUnit(command) || !World.Has<Armament>(command.Unit) || command.TypeIndex is < 0 or > byte.MaxValue || !Enum.IsDefined(stance))
+        {
+            return false;
+        }
+
+        ref var armament = ref World.Get<Armament>(command.Unit);
+        armament.Stance = stance;
+        return true;
     }
 
     private bool IsFootprintFree(Cell origin, int width, int height)

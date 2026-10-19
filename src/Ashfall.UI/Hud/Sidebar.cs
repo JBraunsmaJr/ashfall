@@ -5,6 +5,7 @@ using Ashfall.Rendering;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Orders;
 using Ashfall.Simulation.Players;
 using Ashfall.UI.Drawing;
 using Ashfall.UI.Text;
@@ -39,6 +40,82 @@ public sealed class Sidebar
         {
             _activeTab = value;
             _attention[(int)value] = false;
+        }
+    }
+
+    /// <summary>Whether the stance buttons show (armed units of the player's are selected). Set by the screen.</summary>
+    public bool ShowStances { get; set; }
+
+    /// <summary>The selection's stance when all of it shares one; null when mixed. Set by the screen.</summary>
+    public UnitStance? CurrentStance { get; set; }
+
+    /// <summary>The stance button under <paramref name="point"/>, if the buttons show.</summary>
+    public UnitStance? HitStance(Vector2 point)
+    {
+        if (!ShowStances)
+        {
+            return null;
+        }
+
+        foreach (var stance in Stances)
+        {
+            if (Inside(point, StanceRect(stance)))
+            {
+                return stance;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Where a stance button sits: a row just above the footer.</summary>
+    public (float X, float Y, float Width, float Height) StanceRect(UnitStance stance)
+    {
+        var layout = Layout;
+        var gap = 4f * layout.Scale;
+        var height = 20f * layout.Scale;
+        var width = (layout.Width - (2 * layout.Padding) - (2 * gap)) / 3f;
+        var footerLines = 2 * (PixelFont.GlyphHeight + 3) * layout.Scale * 1.5f;
+        var y = layout.Height - layout.Padding - footerLines - height - (8f * layout.Scale);
+        var slot = Array.IndexOf(Stances, stance);
+        return (layout.X + layout.Padding + (slot * (width + gap)), y, width, height);
+    }
+
+    private static readonly UnitStance[] Stances = [UnitStance.Guard, UnitStance.HoldGround, UnitStance.Free];
+
+    private static string StanceLabel(UnitStance stance) => stance switch
+    {
+        UnitStance.Guard => "GUARD",
+        UnitStance.HoldGround => "HOLD",
+        _ => "FREE",
+    };
+
+    private static string StanceHelp(UnitStance stance) => stance switch
+    {
+        UnitStance.Guard => "CHASES, THEN RETURNS",
+        UnitStance.HoldGround => "NEVER MOVES TO FIGHT",
+        _ => "PURSUES ANYWHERE",
+    };
+
+    private void DrawStances(Canvas canvas, SidebarLayout layout, Vector2 mouse)
+    {
+        if (!ShowStances)
+        {
+            return;
+        }
+
+        foreach (var stance in Stances)
+        {
+            var (x, y, width, height) = StanceRect(stance);
+            var current = CurrentStance == stance;
+            var hovered = Inside(mouse, (x, y, width, height));
+            canvas.Rect(x, y, width, height, current ? Palette.ButtonActive : hovered ? Palette.ButtonHover : Palette.Button);
+            canvas.TextCentered(x + (width / 2f), y + ((height - (PixelFont.GlyphHeight * layout.Scale)) / 2f), StanceLabel(stance), layout.Scale,
+                current ? Palette.Text : Palette.TextDim);
+            if (current)
+            {
+                canvas.Frame(x, y, width, height, layout.Scale, Palette.Selection);
+            }
         }
     }
 
@@ -208,11 +285,19 @@ public sealed class Sidebar
             }
         }
 
-        // Footer: the hovered cameo's full name and cost, and why it is unavailable; otherwise the screen's message.
+        DrawStances(canvas, layout, mouse);
+
+        // Footer: the hovered cameo's full name and cost, and why it is unavailable (or what a hovered stance does);
+        // otherwise the screen's message.
         var footerScale = layout.Scale * 1.5f;
         var lineHeight = (PixelFont.GlyphHeight + 3) * footerScale;
         var bottom = layout.Height - layout.Padding - (PixelFont.GlyphHeight * footerScale);
-        if (hovered is not null)
+        if (HitStance(mouse) is { } stanceHovered)
+        {
+            canvas.Text(left, bottom - lineHeight, "STANCE: " + StanceLabel(stanceHovered), footerScale, Palette.Text);
+            canvas.Text(left, bottom, StanceHelp(stanceHovered), footerScale, Palette.TextDim);
+        }
+        else if (hovered is not null)
         {
             var reason = hovered.Available ? null : hovered.Reason;
             var nameY = reason is null ? bottom : bottom - lineHeight;

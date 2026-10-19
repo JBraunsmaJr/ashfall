@@ -8,9 +8,10 @@ using Ashfall.Session.Commands;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
-using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Map;
+using Ashfall.Simulation.Orders;
 using Ashfall.UI.Drawing;
 using Ashfall.UI.Hud;
 using Ashfall.UI.Input;
@@ -179,6 +180,7 @@ public sealed class GameScreen
         _framebuffer = framebuffer;
         _now = input.Time;
         _sidebar.Update(Simulation, Player, framebuffer, _placing);
+        UpdateStanceButtons();
         Camera.ViewportOrigin = Vector2.Zero;
         Camera.ViewportSize = new Vector2(_sidebar.Layout.X, framebuffer.Y);
         PruneSelection();
@@ -210,6 +212,7 @@ public sealed class GameScreen
         // selected unit or building may be dead by now: drop it before anything reads the selection.
         PruneSelection();
         _sidebar.Update(Simulation, Player, _framebuffer, _placing);
+        UpdateStanceButtons();
         scene.Clear();
         scene.ClearColor = Palette.Clear;
         scene.Time = (float)time;
@@ -338,6 +341,18 @@ public sealed class GameScreen
             return;
         }
 
+        if (input.WasPressed(Key.G) && HasArmedSelection())
+        {
+            // Cycles guard, hold ground, free (from the selection's stance, or guard when it is mixed).
+            var current = SelectionStance() ?? UnitStance.Free;
+            SetStance(current switch
+            {
+                UnitStance.Guard => UnitStance.HoldGround,
+                UnitStance.HoldGround => UnitStance.Free,
+                _ => UnitStance.Guard,
+            });
+        }
+
         if (input.WasPressed(Key.Q) && HasArmedSelection())
         {
             _attackMove = true;
@@ -460,6 +475,12 @@ public sealed class GameScreen
 
         if (!input.WasPressed(MouseButton.Left) || _orders is null)
         {
+            return;
+        }
+
+        if (_sidebar.HitStance(input.Mouse) is { } stance)
+        {
+            SetStance(stance);
             return;
         }
 
@@ -944,8 +965,8 @@ public sealed class GameScreen
         // Help and status, bottom-left of the view.
         var scale = _sidebar.Layout.Scale;
         var help = Networked
-            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS"
-            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  +/- SPEED  P PAUSE";
+            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS"
+            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  +/- SPEED  P PAUSE";
         canvas.TextShadowed(8 * scale, _framebuffer.Y - (14 * scale), help, scale, Palette.TextDim);
         var tick = Simulation.Tick;
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);
@@ -1189,6 +1210,53 @@ public sealed class GameScreen
                 yield return entity;
             }
         }
+    }
+
+    /// <summary>The stance shared by every armed unit selected, or null when there are none or they differ.</summary>
+    public UnitStance? SelectionStance()
+    {
+        UnitStance? shared = null;
+        foreach (var entity in _selection)
+        {
+            if (!Simulation.World.IsAlive(entity) || !Simulation.World.Has<Armament>(entity))
+            {
+                continue;
+            }
+
+            var stance = Simulation.World.Get<Armament>(entity).Stance;
+            if (shared is { } other && other != stance)
+            {
+                return null;
+            }
+
+            shared = stance;
+        }
+
+        return shared;
+    }
+
+    private void SetStance(UnitStance stance)
+    {
+        if (_orders is null)
+        {
+            return;
+        }
+
+        foreach (var entity in _selection)
+        {
+            if (Simulation.World.IsAlive(entity) && Simulation.World.Has<Armament>(entity))
+            {
+                _orders.Enqueue(Command.SetStance(Player, entity, stance));
+            }
+        }
+
+        Say("STANCE: " + (stance == UnitStance.HoldGround ? "HOLD GROUND" : stance.ToString().ToUpperInvariant()), Palette.Text);
+    }
+
+    private void UpdateStanceButtons()
+    {
+        _sidebar.ShowStances = _orders is not null && HasArmedSelection();
+        _sidebar.CurrentStance = SelectionStance();
     }
 
     private bool HasArmedSelection() => _selection.Any(entity => Simulation.World.IsAlive(entity) && Simulation.World.Has<Armament>(entity));

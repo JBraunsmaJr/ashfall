@@ -28,7 +28,10 @@ public sealed class SwarmSystem : ISystem
     public const int CellCapacity = 8;
 
     // Ticks between a creature's looks around for units to attack (staggered across creatures).
-    private const int ScanPeriod = 6;
+    private const int ScanPeriod = 4;
+
+    // How much further than twice its aggro range a creature chases a unit before letting it go.
+    private static readonly Fix64 ChaseSlack = Fix64.FromInt(4);
 
     // A brooding creature attacks player units this close to its nest's centre.
     private static readonly Fix64 GuardRadius = Fix64.FromInt(9);
@@ -57,6 +60,7 @@ public sealed class SwarmSystem : ISystem
         var map = context.Map;
         var field = simulation.RefreshSwarmField();
         var positions = world.Store<Position>();
+        var healths = world.Store<Health>();
         var indices = creatures.EntityIndices;
         var states = creatures.Components;
 
@@ -95,15 +99,34 @@ public sealed class SwarmSystem : ISystem
                 creature.Brooding = false; // its nest is gone: nothing left to guard
             }
 
-            if (creature.Target.IsNone && context.IsStaggeredTick(index, ScanPeriod))
+            // Shot at: turn on the attacker (a unit, not a building), whatever it was doing.
+            ref var health = ref healths.Get(index);
+            if (!health.LastAttacker.IsNone)
             {
-                // A brood guards its nest: it goes for any unit near the nest, not just near itself.
-                creature.Target = creature.Brooding
-                    ? FindUnitInReach(simulation, world.Get<Position>(creature.Home).Value, GuardRadius)
-                    : FindUnitInReach(simulation, position.Value, definition.AggroRange);
+                if ((creature.Target.IsNone || world.Has<StructureInfo>(creature.Target))
+                    && IsValidTarget(simulation, health.LastAttacker) && !world.Has<StructureInfo>(health.LastAttacker))
+                {
+                    creature.Target = health.LastAttacker;
+                }
+
+                health.LastAttacker = Entity.None;
             }
 
-            if (!creature.Target.IsNone && Engage(simulation, definition, ref creature, ref position))
+            // Looks around for units: when it has nothing to do, and while it chews on a building (a unit that comes
+            // near matters more than the wall).
+            if ((creature.Target.IsNone || world.Has<StructureInfo>(creature.Target)) && context.IsStaggeredTick(index, ScanPeriod))
+            {
+                // A brood guards its nest: it goes for any unit near the nest, not just near itself.
+                var found = creature.Brooding
+                    ? FindUnitInReach(simulation, world.Get<Position>(creature.Home).Value, GuardRadius)
+                    : FindUnitInReach(simulation, position.Value, definition.AggroRange);
+                if (!found.IsNone)
+                {
+                    creature.Target = found;
+                }
+            }
+
+            if (!creature.Target.IsNone && Engage(simulation, definition, world.EntityAt(index), ref creature, ref position))
             {
                 continue;
             }
@@ -209,7 +232,7 @@ public sealed class SwarmSystem : ISystem
     /// Attacks the target when in reach, otherwise closes on it. Returns false when the creature should follow the
     /// flow field instead (the target is a unit that got away, or the straight way to it is blocked).
     /// </summary>
-    private bool Engage(GameSimulation simulation, CreatureDefinition definition, ref Creature creature, ref Position position)
+    private bool Engage(GameSimulation simulation, CreatureDefinition definition, Entity self, ref Creature creature, ref Position position)
     {
         var world = simulation.World;
         var aim = simulation.ClosestPointOf(creature.Target, position.Value);
@@ -218,15 +241,15 @@ public sealed class SwarmSystem : ISystem
             if (creature.Cooldown == 0)
             {
                 ref var health = ref world.Get<Health>(creature.Target);
-                health.Current -= DamageTable.Apply(definition.Weapon.Damage, definition.Weapon.Warhead, health.Armor);
+                health.Hit(DamageTable.Apply(definition.Weapon.Damage, definition.Weapon.Warhead, health.Armor), self);
                 creature.Cooldown = definition.Weapon.CooldownTicks;
             }
 
             return true;
         }
 
-        // A unit that has outrun twice the aggro range is let go; the swarm moves on.
-        var leash = definition.AggroRange * 2;
+        // A unit that has got well beyond its aggro range (twice it, and a little more) is let go; the swarm moves on.
+        var leash = (definition.AggroRange * 2) + ChaseSlack;
         if (!world.Has<StructureInfo>(creature.Target) && FixVec2.DistanceSquared(position.Value, aim) > leash * leash)
         {
             creature.Target = Entity.None;

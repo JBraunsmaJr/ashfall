@@ -24,7 +24,7 @@ public class DefenceTests
         var target = sim.SpawnCreature(Skitter, new Cell(12, 10).Center);
         var beside = sim.SpawnCreature(Skitter, new FixVec2(Fix64.FromRatio(25, 2), Fix64.FromRatio(23, 2))); // 0.5 cell off
         var away = sim.SpawnCreature(Skitter, new Cell(12, 14).Center);
-        var friend = sim.SpawnUnit(0, Unit(BulwarkContent.Rifleman), new FixVec2(Fix64.FromInt(12), Fix64.FromRatio(21, 2)));
+        var friend = sim.SpawnUnit(0, Unit(BulwarkContent.Harvester), new FixVec2(Fix64.FromInt(12), Fix64.FromRatio(21, 2))); // unarmed: only the Pyro fires
         var plant = sim.PlaceStructure(0, Structure(BulwarkContent.PowerPlant), new Cell(13, 9));
         Freeze(sim);
 
@@ -34,7 +34,7 @@ public class DefenceTests
         Assert.Equal(40 - burn, sim.World.Get<Health>(target).Current);
         Assert.Equal(40 - burn, sim.World.Get<Health>(beside).Current);
         Assert.Equal(40, sim.World.Get<Health>(away).Current);
-        Assert.Equal(125, sim.World.Get<Health>(friend).Current);
+        Assert.Equal(700, sim.World.Get<Health>(friend).Current);
         Assert.Equal(500, sim.World.Get<Health>(plant).Current);
     }
 

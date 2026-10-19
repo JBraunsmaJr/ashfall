@@ -42,18 +42,18 @@ public sealed class WeaponSystem : ISystem
 
             var impact = context.Simulation.ClosestPointOf(target, position);
             ref var health = ref world.Get<Health>(target);
-            health.Current -= DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor);
+            health.Hit(DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor), unit);
             armament.Cooldown = weapon.CooldownTicks;
             if (weapon.SplashRadius > Fix64.Zero)
             {
-                Splash(context, world.Get<Owner>(unit).PlayerId, target, impact, weapon);
+                Splash(context, unit, world.Get<Owner>(unit).PlayerId, target, impact, weapon);
             }
         }
     }
 
     // Every other enemy unit or creature within the splash radius of the impact point takes the same hit, in
     // spatial-grid order. Structures are never splashed: flame clears a crowd, it does not raze a base.
-    private static void Splash(in TickContext context, int owner, Entity target, FixVec2 impact, WeaponDefinition weapon)
+    private static void Splash(in TickContext context, Entity shooter, int owner, Entity target, FixVec2 impact, WeaponDefinition weapon)
     {
         var simulation = context.Simulation;
         var world = context.World;
@@ -77,7 +77,7 @@ public sealed class WeaponSystem : ISystem
                     }
 
                     ref var health = ref healths.Get(index);
-                    health.Current -= DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor);
+                    health.Hit(DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor), shooter);
                 }
             }
         }
