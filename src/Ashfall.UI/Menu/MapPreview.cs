@@ -16,8 +16,8 @@ namespace Ashfall.UI.Menu;
 public sealed class MapPreview
 {
     private readonly object _gate = new();
-    private (MapSettings? Settings, int Players) _wanted = (null, 2);
-    private (MapSettings? Settings, int Players)? _shown;
+    private (MapSettings? Settings, int Players, bool Coop) _wanted = (null, 2, false);
+    private (MapSettings? Settings, int Players, bool Coop)? _shown;
     private MatchMap? _map;
     private int _version;
     private bool _busy;
@@ -49,13 +49,16 @@ public sealed class MapPreview
         }
     }
 
-    /// <summary>Asks for the map these settings make (null: the hand-made map) for <paramref name="players"/> players.</summary>
-    public void Request(MapSettings? settings, int players)
+    /// <summary>
+    /// Asks for the map these settings make (null: the hand-made map) for <paramref name="players"/> players, laid out
+    /// for co-op allies with <paramref name="coop"/>.
+    /// </summary>
+    public void Request(MapSettings? settings, int players, bool coop = false)
     {
         int version;
         lock (_gate)
         {
-            var wanted = (settings, players);
+            var wanted = (settings, players, coop);
             if (_wanted == wanted && (_shown == wanted || _busy))
             {
                 return;
@@ -68,14 +71,14 @@ public sealed class MapPreview
 
         if (Synchronous)
         {
-            Complete(version, MatchMap.Create(settings, players), (settings, players));
+            Complete(version, MatchMap.Create(settings, players, coop), (settings, players, coop));
             return;
         }
 
-        _ = Task.Run(() => Complete(version, MatchMap.Create(settings, players), (settings, players)));
+        _ = Task.Run(() => Complete(version, MatchMap.Create(settings, players, coop), (settings, players, coop)));
     }
 
-    private void Complete(int version, MatchMap map, (MapSettings?, int) request)
+    private void Complete(int version, MatchMap map, (MapSettings?, int, bool) request)
     {
         lock (_gate)
         {

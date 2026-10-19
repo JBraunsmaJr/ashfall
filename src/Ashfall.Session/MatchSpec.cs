@@ -173,9 +173,6 @@ public sealed record MatchSpec
     /// <summary>How much each wave of a Purge outgrows the last (30 for one player, 60 for four).</summary>
     public static int PurgeWaveGrowth(int players) => 20 + (10 * players);
 
-    /// <summary>Starts a generated map needs for a Purge of this many players: the generator makes maps for 2 to 4.</summary>
-    public static int PurgeMapStarts(int players) => Math.Max(players, 2);
-
     public MatchSpec WithPlayers(int players) => this with { Players = players };
 
     /// <summary>Plays the skirmish on a generated map (its size comes from the settings).</summary>

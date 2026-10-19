@@ -226,9 +226,8 @@ public sealed class HeadlessMatch : IAsyncDisposable
         return simulation;
     }
 
-    // Co-op against the Maw: the players' bases on a generated map (made for at least two starts; a lone player
-    // takes the first and the Maw the fields of the rest), Spawning Pits on the fields away from them, and a horde
-    // that breeds only from the nests.
+    // Co-op against the Maw: the players' bases together in the team area of a co-op map, Spawning Pits on the
+    // fields away from them, and a horde that breeds only from the nests.
     private static GameSimulation CreatePurge(MatchSpec spec, List<ICommandSource> sources, out LocalOrders? localPlayer, out MatchMap matchMap)
     {
         var content = GameContent.Standard;
@@ -238,7 +237,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
             players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId);
         }
 
-        var map = matchMap = MatchMap.Create(spec.GeneratedMap, MatchSpec.PurgeMapStarts(spec.Players));
+        var map = matchMap = MatchMap.Create(spec.GeneratedMap, spec.Players, coop: true);
         var horde = new HordeSettings
         {
             CreatureType = content.CreatureIndex(MawContent.Skitter),

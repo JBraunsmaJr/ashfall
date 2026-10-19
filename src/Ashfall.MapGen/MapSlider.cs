@@ -26,4 +26,13 @@ public enum MapSlider
 
     /// <summary>Woodland density (never on lanes or in bases).</summary>
     Vegetation,
+
+    /// <summary>
+    /// How many Cindrite fields the map has besides each base's own: from none (0) through the classic expansion,
+    /// flank and centre fields (50) to three more wild fields per base sector (100).
+    /// </summary>
+    Fields,
+
+    /// <summary>How fast harvested fields grow back: a quarter of the normal rate (0), normal (50), three times (100).</summary>
+    Regrowth,
 }

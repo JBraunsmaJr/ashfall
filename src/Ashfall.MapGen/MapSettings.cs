@@ -5,19 +5,24 @@ namespace Ashfall.MapGen;
 
 /// <summary>
 /// Everything that decides a generated map apart from the player count: the archetype, a seed and the
-/// seven slider values. Every peer generates the same map from the same settings, so this (as a map
-/// code) is all a lobby needs to send. Map codes look like <c>CRS-7F3AQ2-0M9KX1-ZT4R8B</c>.
+/// slider values. Every peer generates the same map from the same settings, so this (as a map code) is all
+/// a lobby needs to send. Map codes look like <c>CRS-7F3AQ2-0M9KX1-ZT4R8B2M0</c>; the shorter codes of
+/// version 1 (seven sliders) still read, with the later sliders at their defaults.
 /// </summary>
 public sealed record MapSettings
 {
-    /// <summary>Bumped whenever a code's layout changes.</summary>
-    public const int CodeVersion = 1;
+    /// <summary>Bumped whenever a code's layout changes. 1: seven sliders. 2: nine (Fields, Regrowth).</summary>
+    public const int CodeVersion = 2;
 
     private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base 32: no I, L, O, U
     private const int SliderBits = 7;
-    private const int PayloadBits = 4 + 32 + (SliderBits * 7);
     private const int ChecksumBits = 5;
-    private const int CodeChars = (PayloadBits + ChecksumBits) / 5;
+
+    // Sliders each code version carries.
+    private static int SlidersIn(int version) => version == 1 ? 7 : 9;
+
+    // Characters in a code of a version: version, seed, sliders and checksum, rounded up to whole characters.
+    private static int CharsIn(int version) => (4 + 32 + (SliderBits * SlidersIn(version)) + ChecksumBits + 4) / 5;
 
     private readonly int[] _sliders;
 
@@ -79,8 +84,9 @@ public sealed record MapSettings
         }
 
         bits = (bits << ChecksumBits) | Checksum(bits);
-        var chars = new char[CodeChars];
-        for (var i = CodeChars - 1; i >= 0; i--)
+        var length = CharsIn(CodeVersion);
+        var chars = new char[length];
+        for (var i = length - 1; i >= 0; i--)
         {
             chars[i] = Alphabet[(int)(bits & 31)];
             bits >>= 5;
@@ -112,7 +118,8 @@ public sealed record MapSettings
         }
 
         var text = cleaned.ToString();
-        if (text.Length != 3 + CodeChars || MapArchetypes.Find(text[..3]) is not { } archetype)
+        var version = text.Length == 3 + CharsIn(1) ? 1 : text.Length == 3 + CharsIn(CodeVersion) ? CodeVersion : 0;
+        if (version == 0 || MapArchetypes.Find(text[..3]) is not { } archetype)
         {
             return false;
         }
@@ -136,7 +143,7 @@ public sealed record MapSettings
             return false;
         }
 
-        var sliders = new int[SliderCount];
+        var sliders = new int[SlidersIn(version)];
         for (var i = sliders.Length - 1; i >= 0; i--)
         {
             sliders[i] = (int)(bits & ((1u << SliderBits) - 1));
@@ -149,12 +156,12 @@ public sealed record MapSettings
 
         var seed = (uint)(bits & uint.MaxValue);
         bits >>= 32;
-        if (bits != CodeVersion)
+        if (bits != (uint)version)
         {
             return false;
         }
 
-        settings = new MapSettings(archetype, seed, sliders);
+        settings = new MapSettings(archetype, seed, sliders); // sliders a version 1 code lacks take the archetype's defaults
         return true;
     }
 

@@ -30,18 +30,23 @@ public static class MapGenerator
 
     public const int MaxPlayers = 4;
 
-    /// <summary>Generates the map for <paramref name="players"/> players (2–4).</summary>
-    public static GeneratedMap Generate(MapSettings settings, int players)
+    /// <summary>
+    /// Generates the map for <paramref name="players"/> players: 2–4 opponents, each at their own rotation of the
+    /// layout; or, with <paramref name="coop"/>, 1–4 allies who share one team area (GDD section 2). A co-op map is
+    /// laid out as a duel whose first base is the team's: the allies' Construction Yards sit around it, joined to it
+    /// by lanes, and the mirrored side of the map is left to the Maw.
+    /// </summary>
+    public static GeneratedMap Generate(MapSettings settings, int players, bool coop = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        ArgumentOutOfRangeException.ThrowIfLessThan(players, MinPlayers);
+        ArgumentOutOfRangeException.ThrowIfLessThan(players, coop ? 1 : MinPlayers);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(players, MaxPlayers);
         var effective = ApplyLimits(settings, out var clamps);
         var rejected = new List<string>();
         for (var attempt = 0; attempt < MaxAttempts; attempt++)
         {
-            var built = new Builder(effective, players, attempt, plain: false).Build();
-            var report = MapValidator.Validate(built.Map, built.Starts, players, built.Order);
+            var built = new Builder(effective, players, attempt, plain: false, coop).Build();
+            var report = Validate(built, players, coop);
             if (report.Valid)
             {
                 return Finish(built, report, settings, effective, clamps, attempt + 1, fellBack: false, rejected);
@@ -50,8 +55,22 @@ public static class MapGenerator
             rejected.Add(report.Failures[0]);
         }
 
-        var fallback = new Builder(effective, players, 0, plain: true).Build();
-        return Finish(fallback, MapValidator.Validate(fallback.Map, fallback.Starts, players, fallback.Order), settings, effective, clamps, MaxAttempts, fellBack: true, rejected);
+        var fallback = new Builder(effective, players, 0, plain: true, coop).Build();
+        return Finish(fallback, Validate(fallback, players, coop), settings, effective, clamps, MaxAttempts, fellBack: true, rejected);
+    }
+
+    // A versus map is checked start against start. A co-op map is checked as the duel it is laid out as (the team's
+    // base against the Maw's side), and then every ally's yard must be buildable and reachable from the team base.
+    private static MapReport Validate(Built built, int players, bool coop)
+    {
+        if (!coop)
+        {
+            return MapValidator.Validate(built.Map, built.Starts, players, built.Order);
+        }
+
+        var duel = MapValidator.Validate(built.Map, [built.Starts[0], built.Mirror], 2, built.Order);
+        var team = MapValidator.CheckTeam(built.Map, built.Starts.Take(players).ToArray());
+        return team.Count == 0 ? duel : duel with { Failures = [.. duel.Failures, .. team] };
     }
 
     /// <summary>Map edge length for these settings.</summary>
@@ -111,6 +130,14 @@ public static class MapGenerator
 
     private const int MaxClutterShare = 25;
 
+    /// <summary>The Regrowth slider as a percentage of the normal rate: 25 at 0, 100 at 50, 300 at 100.</summary>
+    public static int RegrowthPercent(MapSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var value = settings[MapSlider.Regrowth];
+        return value <= 50 ? 25 + (value * 75 / 50) : 100 + ((value - 50) * 200 / 50);
+    }
+
     // Percent of the map each feature covers at its slider value.
     private static int LakeShare(MapSettings settings) => settings[MapSlider.Water] * 20 / 100;
 
@@ -138,7 +165,8 @@ public static class MapGenerator
         SymmetryOrder = built.Order,
     };
 
-    private sealed record Built(GridMap Map, Cell[] Starts, int Order);
+    /// <param name="Mirror">The first start's rotation: on a co-op map, the Maw's side.</param>
+    private sealed record Built(GridMap Map, Cell[] Starts, int Order, Cell Mirror);
 
     /// <summary>One generation attempt. Per-cell working state lives in flat arrays indexed y * size + x.</summary>
     private sealed class Builder
@@ -160,15 +188,18 @@ public static class MapGenerator
         private readonly bool[] _pad;
         private readonly int[] _cindrite;
         private readonly bool[] _fissure;
+        private readonly bool _coop;
+        private Cell[] _team = [];
 
-        public Builder(MapSettings settings, int players, int attempt, bool plain)
+        public Builder(MapSettings settings, int players, int attempt, bool plain, bool coop)
         {
             _settings = settings;
             _archetype = settings.Archetype;
             _players = players;
             _plain = plain;
+            _coop = coop;
             _size = SizeOf(settings);
-            _symmetry = new MapSymmetry(_size, MapSymmetry.OrderFor(players));
+            _symmetry = new MapSymmetry(_size, coop ? 2 : MapSymmetry.OrderFor(players));
             _quarter = new MapSymmetry(_size, 4);
             _seed = ValueNoise.Hash(settings.Seed, attempt, Version, 0xA5F);
             _random = new DeterministicRandom(_seed, 17);
@@ -188,6 +219,7 @@ public static class MapGenerator
         public Built Build()
         {
             var layout = PlanLayout();
+            _team = _coop ? TeamSites(layout) : [];
             PaintLanes(layout);
             PaintHeights(layout);
             if (!_plain)
@@ -203,7 +235,8 @@ public static class MapGenerator
             }
 
             PaintFields(layout);
-            return new Built(ToGrid(), StartOrigins(layout), Order);
+            var origin = new Cell(layout.Start.X - 1, layout.Start.Y - 1);
+            return new Built(ToGrid(), StartOrigins(layout), Order, _symmetry.RotateFootprint(origin, YardSize, 1));
         }
 
         // ---- layout ---------------------------------------------------------------------------------
@@ -246,16 +279,57 @@ public static class MapGenerator
             var origin = new Cell(layout.Start.X - 1, layout.Start.Y - 1);
             for (var player = 0; player < _players; player++)
             {
-                starts[player] = _symmetry.RotateFootprint(origin, YardSize, player);
+                // Versus: each player at a rotation of the base. Co-op: the allies at the team sites around it.
+                starts[player] = !_coop ? _symmetry.RotateFootprint(origin, YardSize, player)
+                    : player == 0 ? origin
+                    : new Cell(_team[player - 1].X - 1, _team[player - 1].Y - 1);
             }
 
             return starts;
+        }
+
+        // Co-op: where the allies' bases go, around the team's base: across from its field first, then toward the
+        // centre, then the diagonals; each on the map with room to build and clear of the base field and each other.
+        private Cell[] TeamSites(Layout layout)
+        {
+            var start = layout.Start;
+            var toward = new Cell(Sign(layout.Centre.X - start.X), Sign(layout.Centre.Y - start.Y));
+            var side = new Cell(toward.Y, -toward.X);
+            Cell At(int along, int across) => new(start.X + (toward.X * along) + (side.X * across), start.Y + (toward.Y * along) + (side.Y * across));
+            Cell[] candidates = [At(0, -9), At(9, 0), At(8, -8), At(8, 8), At(0, 9), At(-7, -7)];
+            var sites = new List<Cell>();
+            foreach (var site in candidates)
+            {
+                if (sites.Count == _players - 1)
+                {
+                    break;
+                }
+
+                if (site.X >= 5 && site.Y >= 5 && site.X < _size - 5 && site.Y < _size - 5
+                    && !Near(site, layout.BaseField, FieldRadius() + 5)
+                    && sites.TrueForAll(other => !Near(site, other, 7)))
+                {
+                    sites.Add(site);
+                }
+            }
+
+            while (sites.Count < _players - 1)
+            {
+                sites.Add(At(sites.Count + 1, 0)); // a cramped corner: validation decides whether it is usable
+            }
+
+            return [.. sites];
         }
 
         private void PaintLanes(Layout layout)
         {
             var nextStart = _symmetry.Rotate(layout.Start, 1);
             Lane(layout.Start, layout.Expansion, layout.LaneWidth + 1);
+            foreach (var site in _team)
+            {
+                Lane(layout.Start, site, layout.LaneWidth + 1);
+            }
+
             Lane(layout.Expansion, layout.Centre, layout.LaneWidth);
             Lane(layout.Start, layout.Flank, layout.LaneWidth);
             Lane(layout.Flank, nextStart, layout.LaneWidth);
@@ -319,6 +393,11 @@ public static class MapGenerator
 
             // Flat ground for bases, expansions, flanks and the centre, at each node's own level.
             Pad(layout.Start, layout.PlateauRadius, LevelAt(layout.Start));
+            foreach (var site in _team)
+            {
+                Pad(site, 6, LevelAt(layout.Start)); // allies build on the team's own level
+            }
+
             Pad(layout.BaseField, FieldRadius() + 2, LevelAt(layout.Start));
             Pad(layout.Expansion, 5, LevelAt(layout.Expansion));
             Pad(layout.Flank, 4, LevelAt(layout.Flank));
@@ -414,6 +493,10 @@ public static class MapGenerator
 
             // Bases stay dry whatever the river does.
             Disc(layout.Start, layout.PlateauRadius, cell => _terrain[Index(cell)] = Terrain.Clear);
+            foreach (var site in _team)
+            {
+                Disc(site, 6, cell => _terrain[Index(cell)] = Terrain.Clear);
+            }
         }
 
         private void SetWater(Cell cell)
@@ -514,24 +597,99 @@ public static class MapGenerator
 
         private int FieldRadius() => 2 + (_settings[MapSlider.Richness] * 2 / 100);
 
+        // The Fields slider: how many of the classic expansion, flank and centre fields there are (all three at 50),
+        // then up to three wild fields per sector in the open ground (100).
+        private int FieldCount() => _settings[MapSlider.Fields] * 6 / 100;
+
         private void PaintFields(Layout layout)
         {
             var richness = _settings[MapSlider.Richness];
             var density = 300 + (richness * 3);
+            var count = FieldCount();
             Field(layout.BaseField, FieldRadius(), density);
-            Field(layout.Expansion, FieldRadius() + 1, density + 100);
-            Field(layout.Flank, FieldRadius() - 1, density);
-            Field(layout.Centre, 3 + (richness * 2 / 100), density + 200);
+            if (count >= 1)
+            {
+                Field(layout.Expansion, FieldRadius() + 1, density + 100);
+            }
+
+            if (count >= 2)
+            {
+                Field(layout.Flank, FieldRadius() - 1, density);
+            }
+
+            if (count >= 3)
+            {
+                Field(layout.Centre, 3 + (richness * 2 / 100), density + 200);
+            }
+
+            if (count > 3)
+            {
+                PaintWildFields(layout, count - 3, density);
+            }
+
+            // Co-op: each ally gets a small field of their own, beyond their yard on the side away from the team base.
+            foreach (var site in _team)
+            {
+                var outward = new Cell(Sign(site.X - layout.Start.X), Sign(site.Y - layout.Start.Y));
+                var field = new Cell(site.X + (outward.X * 5), site.Y + (outward.Y * 5));
+                if (field.X >= 3 && field.Y >= 3 && field.X < _size - 3 && field.Y < _size - 3)
+                {
+                    Field(field, FieldRadius() - 1, density);
+                }
+            }
 
             // Each base's Construction Yard footprint, and a ring around it, is clear ground.
-            Disc(layout.Start, 2, cell =>
+            foreach (var yard in _team.Prepend(layout.Start))
             {
-                var index = Index(cell);
-                _terrain[index] = Terrain.Clear;
-                _cindrite[index] = 0;
-                _fissure[index] = false;
-            });
+                Disc(yard, 2, cell =>
+                {
+                    var index = Index(cell);
+                    _terrain[index] = Terrain.Clear;
+                    _cindrite[index] = 0;
+                    _fissure[index] = false;
+                });
+            }
         }
+
+        // Fields scattered over open ground in the first sector (copied to every other): well away from the bases, the
+        // other fields and each other, never on water.
+        private void PaintWildFields(Layout layout, int count, int density)
+        {
+            var taken = new List<Cell> { layout.Start, layout.BaseField, layout.Expansion, layout.Flank, layout.Centre };
+            var placed = 0;
+            for (var attempt = 0; attempt < 200 && placed < count; attempt++)
+            {
+                var cell = new Cell(_random.Next(4, _size - 4), _random.Next(4, _size - 4));
+                if (!InFirstSector(cell, layout.Start) || _terrain[Index(cell)] == Terrain.Water || _lane[Index(cell)]
+                    || Near(cell, layout.Start, 16) || taken.Any(other => Near(cell, other, 9)))
+                {
+                    continue;
+                }
+
+                Field(cell, FieldRadius(), density);
+                taken.Add(cell);
+                placed++;
+            }
+        }
+
+        // Closer to the first start than to any of its rotations.
+        private bool InFirstSector(Cell cell, Cell start)
+        {
+            var own = Distance2(cell, start);
+            for (var step = 1; step < Order; step++)
+            {
+                if (Distance2(cell, _symmetry.Rotate(start, step)) <= own)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool Near(Cell a, Cell b, int distance) => Distance2(a, b) < distance * distance;
+
+        private static int Distance2(Cell a, Cell b) => ((a.X - b.X) * (a.X - b.X)) + ((a.Y - b.Y) * (a.Y - b.Y));
 
         private void Field(Cell centre, int radius, int density)
         {
@@ -644,7 +802,7 @@ public static class MapGenerator
 
         private GridMap ToGrid()
         {
-            var map = new GridMap(_size, _size);
+            var map = new GridMap(_size, _size) { RegrowthPercent = RegrowthPercent(_settings) };
             for (var y = 0; y < _size; y++)
             {
                 for (var x = 0; x < _size; x++)

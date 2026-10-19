@@ -32,6 +32,46 @@ public static class MapValidator
     /// <summary>Starts closer than this by ground (cells) make for an unplayable rush map.</summary>
     public const int MinEnemyPath = 24;
 
+    /// <summary>
+    /// For a co-op team: every ally's Construction Yard footprint is buildable and reachable by ground from the first
+    /// (the team's) base. Returns the failures, if any.
+    /// </summary>
+    public static IReadOnlyList<string> CheckTeam(GridMap map, IReadOnlyList<Cell> startOrigins)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(startOrigins);
+        var failures = new List<string>();
+        if (startOrigins.Count == 0)
+        {
+            return failures;
+        }
+
+        var fromTeam = Distances(map, startOrigins[0]);
+        for (var player = 1; player < startOrigins.Count; player++)
+        {
+            var origin = startOrigins[player];
+            for (var y = 0; y < YardSize; y++)
+            {
+                for (var x = 0; x < YardSize; x++)
+                {
+                    if (!map.IsBuildable(new Cell(origin.X + x, origin.Y + y)))
+                    {
+                        failures.Add($"ally {player + 1}: the Construction Yard footprint is blocked");
+                        y = YardSize;
+                        break;
+                    }
+                }
+            }
+
+            if (DistanceToFootprint(fromTeam, map, origin) < 0)
+            {
+                failures.Add($"ally {player + 1} cannot reach the team base by ground");
+            }
+        }
+
+        return failures;
+    }
+
     public static MapReport Validate(GridMap map, IReadOnlyList<Cell> startOrigins, int players, int symmetryOrder)
     {
         ArgumentNullException.ThrowIfNull(map);

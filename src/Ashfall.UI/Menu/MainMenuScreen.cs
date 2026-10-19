@@ -442,9 +442,9 @@ public sealed class MainMenuScreen
         }
 
         // The preview square in the left column, with a one-line summary under it.
-        void PreviewBlock(int players, float bottomLimit)
+        void PreviewBlock(int players, float bottomLimit, bool coop = false)
         {
-            Preview.Request(Map, players);
+            Preview.Request(Map, players, coop);
             var size = Math.Max(120 * scale, Math.Min(columnWidth, bottomLimit - y - (20 * scale)));
             _previews.Add((x0, y, size));
             y += size + (6 * scale);
@@ -502,9 +502,9 @@ public sealed class MainMenuScreen
                 Note(seedOk
                     ? "CO-OP AGAINST THE MAW: DESTROY EVERY NEST. NESTS FEED ON THE CINDRITE FIELDS AND BREED; FROM THREE MINUTES THE MAW PROBES, RAIDS AND ASSAULTS, ALWAYS WITH WARNING. CLICK THE MAW TO CHANGE ITS DIFFICULTY. AI ALLIES SHARE YOUR TEAM."
                     : "ENTER A NUMBER FOR THE SEED.", seedOk ? Palette.TextDim : Palette.TextWarn);
-                PreviewBlock(Ashfall.Session.MatchSpec.PurgeMapStarts(players), bottom);
+                PreviewBlock(players, bottom, coop: true);
                 var leftBottom = y;
-                var rightBottom = MapColumn(columnTop, Ashfall.Session.MatchSpec.PurgeMapStarts(players), handMade: false);
+                var rightBottom = MapColumn(columnTop, players, handMade: false);
                 x0 = inner;
                 y = Math.Max(leftBottom, rightBottom);
                 Actions("START", () => Choose(MenuAction.Purge), seedOk && MapOk());

@@ -39,6 +39,22 @@ public class CindriteTests
         Assert.Equal(400, sim.Map.CindriteAt(cell)); // never past its cap
     }
 
+    [Theory]
+    [InlineData(300, 15)]
+    [InlineData(25, 1)]
+    [InlineData(10, 1)]
+    public void The_maps_regrowth_rate_scales_each_step_but_never_stops_it(int percent, int step)
+    {
+        var sim = WithRegrowth();
+        sim.Map.RegrowthPercent = percent;
+        var cell = new Cell(5, 5);
+        sim.Map.SetCindrite(cell, 400);
+        sim.Map.TakeCindrite(cell, 100);
+
+        Run(sim, Rules.CindriteRegrowIntervalTicks + 1);
+        Assert.Equal(300 + step, sim.Map.CindriteAt(cell));
+    }
+
     [Fact]
     public void An_emptied_cell_regrows_only_beside_living_field()
     {

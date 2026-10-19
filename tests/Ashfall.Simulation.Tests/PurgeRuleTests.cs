@@ -44,7 +44,7 @@ public class PurgeRuleTests
         foreach (var index in sim.World.Store<Creature>().EntityIndices)
         {
             var cell = Cell.Containing(sim.World.Store<Position>().Get(index).Value);
-            Assert.InRange(Math.Max(Math.Abs(cell.X - mouth.X), Math.Abs(cell.Y - mouth.Y)), 0, 5);
+            Assert.InRange(Math.Max(Math.Abs(cell.X - mouth.X), Math.Abs(cell.Y - mouth.Y)), 0, 7);
         }
 
         // ...then all of it goes, at the player's base, and the next assault may grow bigger after the breathing room.
@@ -180,6 +180,26 @@ public class PurgeRuleTests
         Assert.All(
             sim.World.Store<Creature>().Components.ToArray().Where(creature => !creature.Brooding),
             creature => Assert.Equal(SwarmGoal.Nearest, creature.Goal));
+    }
+
+    [Fact]
+    public void A_brood_roams_around_its_nest_instead_of_standing_still()
+    {
+        var sim = WaveMatch(out _, out var nest, interval: 3_000, difficulty: MawDifficulty.Recruit); // no probe before tick 900
+        var mouth = sim.ExitCell(sim.World.Get<StructureInfo>(nest));
+        Run(sim, 200);
+        var creature = sim.World.EntityAt(sim.World.Store<Creature>().EntityIndices[0]);
+        var spots = new HashSet<Cell>();
+        for (var tick = 0; tick < 600; tick++)
+        {
+            sim.Step([]);
+            var cell = Cell.Containing(PositionOf(sim, creature));
+            spots.Add(cell);
+            Assert.InRange(Math.Max(Math.Abs(cell.X - mouth.X), Math.Abs(cell.Y - mouth.Y)), 0, 8);
+        }
+
+        Assert.True(sim.World.Get<Creature>(creature).Brooding);
+        Assert.True(spots.Count >= 4, $"It only ever stood on {spots.Count} cells.");
     }
 
     [Fact]

@@ -54,6 +54,12 @@ public sealed class GridMap
     /// </summary>
     public long StructureVersion { get; private set; }
 
+    /// <summary>
+    /// How fast this map's fields grow back, in percent of <see cref="Content.EconomyRules.CindriteRegrowAmount"/>
+    /// (100 normally; the generator's Regrowth slider sets it). Part of the map's description, like the caps.
+    /// </summary>
+    public int RegrowthPercent { get; set; } = 100;
+
     /// <summary>Total Cindrite left on the map, in credits.</summary>
     public long TotalCindrite { get; private set; }
 

@@ -39,8 +39,11 @@ public sealed class MatchMap
     /// <summary>Hash of the grid as generated (the match then changes the grid as it plays).</summary>
     public ulong Hash { get; }
 
-    /// <summary>Builds the map for <paramref name="players"/> players: generated when <paramref name="settings"/> is given.</summary>
-    public static MatchMap Create(MapSettings? settings, int players)
+    /// <summary>
+    /// Builds the map for <paramref name="players"/> players: generated when <paramref name="settings"/> is given, and
+    /// with <paramref name="coop"/> laid out for allies sharing one team area (a Purge).
+    /// </summary>
+    public static MatchMap Create(MapSettings? settings, int players, bool coop = false)
     {
         if (settings is null)
         {
@@ -48,7 +51,7 @@ public sealed class MatchMap
             return new MatchMap(SkirmishMaps.Create(players), starts, MapSymmetry.OrderFor(players), null) { Name = SkirmishMaps.NameFor(players) };
         }
 
-        var generated = MapGenerator.Generate(settings, players);
+        var generated = MapGenerator.Generate(settings, players, coop);
         return new MatchMap(generated.Map, generated.StartOrigins, generated.SymmetryOrder, generated)
         {
             Name = $"{settings.Archetype.Name} {settings.ToCode()}",
@@ -56,5 +59,5 @@ public sealed class MatchMap
     }
 
     /// <summary>The hash every peer must agree on before a match on these settings starts.</summary>
-    public static ulong HashOf(MapSettings? settings, int players) => Create(settings, players).Hash;
+    public static ulong HashOf(MapSettings? settings, int players, bool coop = false) => Create(settings, players, coop).Hash;
 }

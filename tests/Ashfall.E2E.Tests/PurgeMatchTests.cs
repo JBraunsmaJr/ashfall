@@ -25,6 +25,9 @@ public class PurgeMatchTests
         Assert.Equal(MatchSpec.PurgeDefaultNests, world.Store<Nest>().Count);
 
         var yards = match.Map!.StartOrigins.Take(2).ToArray();
+
+        // Allies share one team area rather than opposite sides of the map.
+        Assert.InRange(Math.Max(Math.Abs(yards[0].X - yards[1].X), Math.Abs(yards[0].Y - yards[1].Y)), 3, 16);
         foreach (var index in world.Store<Nest>().EntityIndices)
         {
             var origin = world.Store<StructureInfo>().Get(index).Origin;
@@ -111,6 +114,40 @@ public class PurgeMatchTests
         Assert.Equal(MawDifficulty.Elite, replay.Spec.Difficulty);
         Assert.Equal(match.Spec.GeneratedMap, replay.Spec.GeneratedMap);
         Assert.True(replay.Verify().Matches);
+    }
+
+    [Fact]
+    public void Nests_can_go_on_open_ground_far_from_the_players_and_bring_their_own_blight()
+    {
+        // A bare map with no fields at all: every nest has to find open ground, and seeds a fissure beside itself.
+        var content = Ashfall.Content.GameContent.Standard;
+        var horde = new Ashfall.Simulation.Horde.HordeSettings
+        {
+            CreatureType = content.CreatureIndex(MawContent.Skitter),
+            Population = 100,
+            EdgeSpawns = false,
+            WaveIntervalTicks = 600,
+        };
+        var simulation = new GameSimulation(5, new GridMap(64, 64), content,
+            [new Ashfall.Simulation.Players.PlayerSetup(0, BulwarkContent.FactionId)], victoryEnabled: false, horde, cindriteRegrowth: true, MatchGoal.Purge);
+        var start = new Cell(4, 4);
+        simulation.PlaceStructure(0, content.StructureIndex(BulwarkContent.ConstructionYard), start);
+
+        Assert.Equal(4, PurgeNests.Place(simulation, [start], 4));
+        var world = simulation.World;
+        var origins = world.Store<Nest>().EntityIndices.ToArray().Select(index => world.Store<StructureInfo>().Get(index).Origin).ToArray();
+        foreach (var origin in origins)
+        {
+            var (dx, dy) = (origin.X - start.X, origin.Y - start.Y);
+            Assert.True((dx * dx) + (dy * dy) >= PurgeNests.MinimumDistance * PurgeNests.MinimumDistance);
+            var fissure = Enumerable.Range(-4, 11).SelectMany(oy => Enumerable.Range(-4, 11).Select(ox => new Cell(origin.X + ox, origin.Y + oy)))
+                .Where(simulation.Map.InBounds).Any(simulation.Map.IsFissure);
+            Assert.True(fissure, $"The nest at {origin} has no blight beside it.");
+        }
+
+        // Spread out, not clumped in one corner.
+        Assert.True(origins.Max(origin => origin.X) - origins.Min(origin => origin.X) > 20 || origins.Max(origin => origin.Y) - origins.Min(origin => origin.Y) > 20);
+        Assert.True(simulation.Map.TotalCindrite > 0);
     }
 
     [Fact]

@@ -36,5 +36,6 @@
     <File Path="eng/compile-shaders.sh" />
     <File Path="eng/lan-match.sh" />
     <File Path=".github/workflows/ci.yml" />
+    <File Path="regen-hashes.ps1" />
   </Folder>
 </Solution>

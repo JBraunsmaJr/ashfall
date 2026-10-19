@@ -5,22 +5,34 @@ using Ashfall.Simulation.Map;
 namespace Ashfall.Session.Maps;
 
 /// <summary>
-/// Seeds a Purge map with the Maw (GDD section 2): a Spawning Pit beside the fissure of each chosen Cindrite field,
-/// so every nest feeds on a field that keeps regrowing until the players take it. Fields are chosen far from the
-/// players' bases and spread out from each other; the fields at the players' own starts are never infested.
+/// Seeds a Purge map with the Maw (GDD section 2): Spawning Pits anywhere far enough from the players' bases, beside
+/// the fissure of a Cindrite field or out on open ground. A pit on open ground brings its own blight: a small field
+/// rising from a fissure beside it, so every nest has something to feed on that keeps regrowing until the players
+/// take it. Sites are chosen far from the bases and spread out from each other; the players' own fields are never
+/// infested.
 /// </summary>
 public static class PurgeNests
 {
-    /// <summary>No nest's fissure is closer than this to a player's Construction Yard, in cells.</summary>
+    /// <summary>No nest is closer than this to a player's Construction Yard, in cells.</summary>
     public const int MinimumDistance = 20;
+
+    // Open-ground sites are tried on a grid this many cells apart.
+    private const int OpenGrid = 5;
+
+    // The blight a nest on open ground brings: its radius and density.
+    private const int BlightRadius = 2;
+    private const int BlightDensity = 350;
 
     // Where the nest's 3x3 footprint centre may sit relative to its fissure: off a corner first (so the vent stays
     // open beside the nest, as in the swarm fortress), then anywhere close.
     private static readonly (int Dx, int Dy)[] Offsets = BuildOffsets();
 
+    // Where a blight's fissure may go relative to its nest's centre: beside it on one side or another.
+    private static readonly (int Dx, int Dy)[] BlightOffsets = [(4, 0), (0, 4), (-4, 0), (0, -4), (4, 4), (-4, 4), (4, -4), (-4, -4)];
+
     /// <summary>
     /// Places up to <paramref name="count"/> Spawning Pits and returns how many were placed (fewer when the map has
-    /// fewer suitable fields). The choice depends only on the map and the starts, so every peer agrees.
+    /// too little room far from the bases). The choice depends only on the map and the starts, so every peer agrees.
     /// </summary>
     public static int Place(GameSimulation simulation, IReadOnlyList<Cell> playerStarts, int count)
     {
@@ -31,21 +43,36 @@ public static class PurgeNests
         var map = simulation.Map;
         var pit = simulation.Content.StructureIndex(MawContent.SpawningPit);
         var footprint = simulation.Content.Structure(pit);
-        var candidates = new List<Cell>();
+        var far = MinimumDistance * MinimumDistance;
+
+        // Every field's fissure, then open ground on a coarse grid, as long as it is far enough from every base.
+        var candidates = new List<(Cell Anchor, bool Fissure)>();
         for (var y = 0; y < map.Height; y++)
         {
             for (var x = 0; x < map.Width; x++)
             {
                 var cell = new Cell(x, y);
-                if (map.IsFissure(cell) && Nearest(cell, playerStarts) >= MinimumDistance * MinimumDistance)
+                if (map.IsFissure(cell) && Nearest(cell, playerStarts) >= far)
                 {
-                    candidates.Add(cell);
+                    candidates.Add((cell, true));
                 }
             }
         }
 
-        // Farthest-point order: each nest goes on the field farthest from the bases and from the nests before it
-        // (ties: the lowest cell index), so a handful of nests covers the map instead of clumping.
+        for (var y = 3; y < map.Height - 3; y += OpenGrid)
+        {
+            for (var x = 3; x < map.Width - 3; x += OpenGrid)
+            {
+                var cell = new Cell(x, y);
+                if (Nearest(cell, playerStarts) >= far && Fits(map, new Cell(x - 1, y - 1), footprint.Width, footprint.Height))
+                {
+                    candidates.Add((cell, false));
+                }
+            }
+        }
+
+        // Farthest-point order: each nest goes where it is farthest from the bases and from the nests before it
+        // (ties: the earlier candidate), so a handful of nests covers the map instead of clumping.
         var taken = new List<Cell>(playerStarts);
         var placed = 0;
         while (placed < count && candidates.Count > 0)
@@ -54,7 +81,7 @@ public static class PurgeNests
             var bestDistance = -1;
             for (var i = 0; i < candidates.Count; i++)
             {
-                var distance = Nearest(candidates[i], taken);
+                var distance = Nearest(candidates[i].Anchor, taken);
                 if (distance > bestDistance)
                 {
                     best = i;
@@ -62,25 +89,74 @@ public static class PurgeNests
                 }
             }
 
-            var fissure = candidates[best];
+            var (anchor, fissure) = candidates[best];
             candidates.RemoveAt(best);
-            if (TryFindOrigin(map, fissure, footprint.Width, footprint.Height, out var origin))
+            Cell origin;
+            if (fissure)
             {
-                for (var y = 0; y < footprint.Height; y++)
+                if (!TryFindOrigin(map, anchor, footprint.Width, footprint.Height, out origin))
                 {
-                    for (var x = 0; x < footprint.Width; x++)
-                    {
-                        map.SetCindrite(new Cell(origin.X + x, origin.Y + y), 0); // nothing grows under the nest
-                    }
+                    continue;
                 }
-
-                simulation.PlaceNest(pit, origin);
-                taken.Add(fissure);
-                placed++;
             }
+            else
+            {
+                origin = new Cell(anchor.X - 1, anchor.Y - 1);
+                if (!Fits(map, origin, footprint.Width, footprint.Height))
+                {
+                    continue; // an earlier nest took the ground
+                }
+            }
+
+            for (var y = 0; y < footprint.Height; y++)
+            {
+                for (var x = 0; x < footprint.Width; x++)
+                {
+                    map.SetCindrite(new Cell(origin.X + x, origin.Y + y), 0); // nothing grows under the nest
+                }
+            }
+
+            simulation.PlaceNest(pit, origin);
+            if (!fissure)
+            {
+                SeedBlight(map, anchor);
+            }
+
+            taken.Add(anchor);
+            placed++;
         }
 
         return placed;
+    }
+
+    // A small field rising from a fissure beside a nest on open ground, on clear unbuilt cells only.
+    private static void SeedBlight(GridMap map, Cell nest)
+    {
+        foreach (var (dx, dy) in BlightOffsets)
+        {
+            var centre = new Cell(nest.X + dx, nest.Y + dy);
+            if (!map.InBounds(centre) || map.TerrainAt(centre) != Terrain.Clear || map.StructureAt(centre) >= 0)
+            {
+                continue;
+            }
+
+            for (var y = -BlightRadius; y <= BlightRadius; y++)
+            {
+                for (var x = -BlightRadius; x <= BlightRadius; x++)
+                {
+                    var distance = Math.Abs(x) + Math.Abs(y);
+                    var cell = new Cell(centre.X + x, centre.Y + y);
+                    if (distance <= BlightRadius && map.InBounds(cell) && map.TerrainAt(cell) == Terrain.Clear
+                        && map.StructureAt(cell) < 0 && map.CindriteAt(cell) == 0)
+                    {
+                        map.SetCindrite(cell, BlightDensity + ((BlightRadius - distance) * 50));
+                    }
+                }
+            }
+
+            map.SetFissure(centre, BlightDensity + (BlightRadius * 50));
+            return;
+        }
     }
 
     private static bool TryFindOrigin(GridMap map, Cell fissure, int width, int height, out Cell origin)

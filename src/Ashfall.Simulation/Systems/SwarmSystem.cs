@@ -11,7 +11,7 @@ namespace Ashfall.Simulation.Systems;
 /// Moves and fights for every Maw creature (GDD section 12, "the swarm path"). Each tick a creature either
 /// attacks its target (a player unit that came within its aggro range, or a player structure it touches),
 /// chases a unit it has noticed, or steps along the flow field toward the nearest player structure. A brooding
-/// creature (see <see cref="Creature.Brooding"/>) instead keeps to its place by its nest until the wave goes,
+/// creature (see <see cref="Creature.Brooding"/>) instead roams around its nest until the wave goes,
 /// fighting only units that come near; if its nest dies, it marches at once.
 /// </summary>
 /// <remarks>
@@ -42,8 +42,11 @@ public sealed class SwarmSystem : ISystem
         (1, 1, FlowField.DiagonalCost), (-1, 1, FlowField.DiagonalCost), (-1, -1, FlowField.DiagonalCost), (1, -1, FlowField.DiagonalCost),
     ];
 
-    // Where brooding creatures wait, relative to their nest's mouth: anywhere within four cells of it.
+    // Where brooding creatures wander, relative to their nest's mouth: anywhere within six cells of it.
     private static readonly (int Dx, int Dy)[] Roosts = BuildRoosts();
+
+    // Ticks a brooding creature lingers at one spot before it wanders to another (staggered across creatures).
+    private const int RoamPeriod = 75;
 
     private int[] _occupancy = [];
 
@@ -133,7 +136,7 @@ public sealed class SwarmSystem : ISystem
 
             if (creature.Brooding)
             {
-                Roost(simulation, definition, index, creature.Home, ref position);
+                Roost(simulation, definition, index, context.Tick, creature.Home, ref position);
                 continue;
             }
 
@@ -154,14 +157,16 @@ public sealed class SwarmSystem : ISystem
         }
     }
 
-    // Walks to (or stays at) this creature's place in the brood around its nest's mouth (the exit cell, where it was
-    // born). Away from that place it takes the open neighbouring cell nearest to it, so a crowd at the mouth spreads
-    // out cell by cell instead of queueing behind one full cell.
-    private void Roost(GameSimulation simulation, CreatureDefinition definition, int index, Entity home, ref Position position)
+    // Walks to (or stays at) this creature's current spot in the brood around its nest's mouth (the exit cell, where it
+    // was born). Away from it, it takes the open neighbouring cell nearest to it, so a crowd at the mouth spreads out
+    // cell by cell instead of queueing behind one full cell. The brood roams: every RoamPeriod (each creature on its
+    // own beat) a creature moves on to another spot, so a nest is ringed by restless creatures rather than a still crowd.
+    private void Roost(GameSimulation simulation, CreatureDefinition definition, int index, long tick, Entity home, ref Position position)
     {
         var map = simulation.Map;
         var mouth = simulation.ExitCell(simulation.World.Get<StructureInfo>(home));
-        var (dx, dy) = Roosts[index % Roosts.Length];
+        var beat = (tick + (index * 13L)) / RoamPeriod;
+        var (dx, dy) = Roosts[(int)((index + (beat * 11)) % Roosts.Length)];
         var roost = new Cell(mouth.X + dx, mouth.Y + dy);
         var cell = Cell.Containing(position.Value);
         if (cell == roost)
@@ -200,12 +205,12 @@ public sealed class SwarmSystem : ISystem
     private static (int Dx, int Dy)[] BuildRoosts()
     {
         var roosts = new List<(int Dx, int Dy)>();
-        for (var dy = -4; dy <= 4; dy++)
+        for (var dy = -6; dy <= 6; dy++)
         {
-            for (var dx = -4; dx <= 4; dx++)
+            for (var dx = -6; dx <= 6; dx++)
             {
                 var distance = (dx * dx) + (dy * dy);
-                if (distance >= 1 && distance <= 16)
+                if (distance >= 1 && distance <= 36)
                 {
                     roosts.Add((dx, dy));
                 }

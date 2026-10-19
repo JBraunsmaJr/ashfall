@@ -19,6 +19,8 @@ public static class MapArchetypes
             new SliderRule(35), // chokepoints
             new SliderRule(50), // base spacing
             new SliderRule(30), // vegetation
+            new SliderRule(50), // fields
+            new SliderRule(50), // regrowth
         ],
         Lakes = true,
         EdgeStarts = true,
@@ -40,6 +42,8 @@ public static class MapArchetypes
             new SliderRule(40),
             new SliderRule(55, 20, 100), // base spacing: bases must stay clear of the banks
             new SliderRule(35),
+            new SliderRule(50),
+            new SliderRule(50),
         ],
         Rivers = true,
     };
