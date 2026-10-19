@@ -85,4 +85,38 @@ public class ReachabilityTests
         Assert.True(FixVec2.DistanceSquared(resting, PositionOf(sim, rifleman)) <= Fix64.One);
         Assert.Equal(trapped, sim.World.Get<Armament>(rifleman).Target);
     }
+
+    [Fact]
+    public void A_route_to_a_building_ends_on_the_side_the_unit_can_reach()
+    {
+        // A power plant whose west side opens on a sealed pocket, its east side on open ground.
+        var map = new GridMap(32, 32);
+        for (var y = 6; y <= 14; y++)
+        {
+            map.SetTerrain(new Cell(6, y), Terrain.Rock);
+        }
+
+        for (var x = 6; x <= 10; x++)
+        {
+            map.SetTerrain(new Cell(x, 6), Terrain.Rock);
+            map.SetTerrain(new Cell(x, 14), Terrain.Rock);
+        }
+
+        var sim = Create(map: map);
+        sim.PlaceStructure(1, Structure(BulwarkContent.PowerPlant), new Cell(9, 9)); // fills x 9-10, closing the pocket
+        for (var y = 7; y <= 13; y++)
+        {
+            if (sim.Map.IsPassable(new Cell(9, y)) && y is < 9 or > 10)
+            {
+                sim.Map.SetTerrain(new Cell(9, y), Terrain.Rock);
+                sim.Map.SetTerrain(new Cell(10, y), Terrain.Rock);
+            }
+        }
+
+        var from = new Cell(20, 10).Center;
+        var westOfPlant = new FixVec2(Fix64.FromInt(9), Fix64.FromInt(10)); // a point on its west face, beside the pocket
+        Assert.False(sim.Navigator.CanReach(Cell.Containing(from), new Cell(8, 10)));
+        Assert.True(sim.Navigator.TryResolveGoal(from, westOfPlant, out var goal));
+        Assert.True(sim.Navigator.CanReach(Cell.Containing(from), goal), $"Resolved to {goal}, inside the pocket.");
+    }
 }

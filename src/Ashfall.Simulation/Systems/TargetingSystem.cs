@@ -258,9 +258,12 @@ public sealed class TargetingSystem : ISystem
         var replan = context.IsStaggeredTick(unit.Index, ChasePeriod);
         if (!replan && !mover.HasTarget)
         {
+            // Stuck: standing where the last route ended, with nowhere better to go (already in the cell a new route
+            // would end in, or no route that arrives at all).
+            var here = Cell.Containing(position);
             var stuck = FixVec2.DistanceSquared(position, mover.Target) <= AtPostSquared && context.Navigator.Paths.CountFor(unit.Index) == 0
-                && Cell.Containing(position) != Cell.Containing(aimPoint)
-                && !context.Navigator.CanReach(position, aimPoint);
+                && here != Cell.Containing(aimPoint)
+                && (!context.Navigator.TryResolveGoal(position, aimPoint, out var goal) || goal == here || !context.Navigator.CanReach(here, goal));
             replan = !stuck;
         }
 

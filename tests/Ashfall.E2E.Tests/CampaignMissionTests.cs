@@ -230,6 +230,47 @@ public class CampaignMissionTests
         Assert.Equal(campaign.Rules.SamplesFor(false, 0, mission.NestTier), result.Samples);
     }
 
+    [Theory]
+    [InlineData(6)]
+    [InlineData(20)]
+    public async Task A_tank_sent_from_the_base_reaches_every_nest(int region)
+    {
+        // These missions once put a nest that touched open ground only at one corner, the rest sealed off by rock and
+        // trees: units sent at it were routed to the sealed side and stalled.
+        var campaign = CampaignState.Start(7, CampaignRuleSets.Standard, MawDifficulty.Veteran);
+        var spec = CampaignMatches.ToMatchSpec(campaign.PlanMission(CampaignTarget.Region(region), campaign.Difficulty, seats: 2))
+            .WithController(0, PlayerController.IdleAi).WithController(1, PlayerController.IdleAi);
+        await using var match = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled);
+        var simulation = match.Simulation;
+        var world = simulation.World;
+        var yard = world.Store<StructureInfo>().EntityIndices.ToArray().First(index => world.Store<Owner>().Get(index).PlayerId == 0);
+        var exit = simulation.ExitCell(world.Store<StructureInfo>().Get(yard));
+        var tanks = new List<(Ashfall.Simulation.Ecs.Entity Tank, Ashfall.Simulation.Map.Cell Nest)>();
+        var orders = new List<Ashfall.Simulation.Commands.Command>();
+        foreach (var index in world.Store<Nest>().EntityIndices.ToArray())
+        {
+            var origin = world.Store<StructureInfo>().Get(index).Origin;
+            var tank = simulation.SpawnUnit(0, simulation.Content.UnitIndex(BulwarkContent.Warden), exit.Center);
+            world.Get<Armament>(tank).Stance = Ashfall.Simulation.Orders.UnitStance.HoldGround;
+            orders.Add(Ashfall.Simulation.Commands.Command.Move(0, tank, new Ashfall.Simulation.Map.Cell(origin.X + 1, origin.Y + 1).Center));
+            tanks.Add((tank, origin));
+        }
+
+        simulation.Step(orders.ToArray());
+        for (var tick = 0; tick < MatchSpec.PurgeGraceTicks - 100; tick++)
+        {
+            simulation.Step([]);
+        }
+
+        foreach (var (tank, origin) in tanks)
+        {
+            var cell = Ashfall.Simulation.Map.Cell.Containing(world.Get<Position>(tank).Value);
+            var dx = cell.X < origin.X ? origin.X - cell.X : cell.X > origin.X + 2 ? cell.X - origin.X - 2 : 0;
+            var dy = cell.Y < origin.Y ? origin.Y - cell.Y : cell.Y > origin.Y + 2 ? cell.Y - origin.Y - 2 : 0;
+            Assert.True(dx <= 1 && dy <= 1, $"The tank sent at the nest at {origin} stopped at {cell}.");
+        }
+    }
+
     [Fact]
     public void Every_first_turn_mission_of_many_campaigns_builds_a_valid_match()
     {

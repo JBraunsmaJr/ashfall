@@ -145,23 +145,29 @@ public static class PurgeNests
         return placed;
     }
 
-    // True if some free cell around the footprint can be walked to from the base.
+    /// <summary>Free cells along a nest's sides (not its corners) a unit from the base must be able to stand in.</summary>
+    public const int MinimumApproaches = 2;
+
+    // True if enough free cells along the footprint's sides can be walked to from the base. A nest that touches open
+    // ground only at a corner is as good as sealed off: units sent at it are routed to its far side and stall there.
     private static bool Approachable(GameSimulation simulation, Cell from, Cell origin, int width, int height)
     {
+        var approaches = 0;
         for (var y = origin.Y - 1; y <= origin.Y + height; y++)
         {
             for (var x = origin.X - 1; x <= origin.X + width; x++)
             {
                 var cell = new Cell(x, y);
-                var edge = x < origin.X || y < origin.Y || x >= origin.X + width || y >= origin.Y + height;
-                if (edge && simulation.Map.IsPassable(cell) && simulation.Navigator.CanReach(from, cell))
+                var outsideX = x < origin.X || x >= origin.X + width;
+                var outsideY = y < origin.Y || y >= origin.Y + height;
+                if (outsideX != outsideY && simulation.Map.IsPassable(cell) && simulation.Navigator.CanReach(from, cell))
                 {
-                    return true;
+                    approaches++;
                 }
             }
         }
 
-        return false;
+        return approaches >= MinimumApproaches;
     }
 
     // A small field rising from a fissure beside a nest on open ground, on clear unbuilt cells only.

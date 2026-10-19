@@ -37,15 +37,24 @@ public sealed class Navigator
     /// True when a unit at <paramref name="from"/> could walk to where <see cref="PlanRoute"/> would send it for
     /// <paramref name="to"/> (the nearest free cell when that point is blocked): no route that falls short.
     /// </summary>
-    public bool CanReach(FixVec2 from, FixVec2 to)
+    public bool CanReach(FixVec2 from, FixVec2 to) => TryResolveGoal(from, to, out var goal) && CanReach(Cell.Containing(from), goal);
+
+    /// <summary>
+    /// The cell a route from <paramref name="from"/> toward <paramref name="to"/> ends in: the cell of
+    /// <paramref name="to"/> itself if it is free, otherwise the nearest free cell the unit can walk to (falling back
+    /// to the nearest free cell at all, if none within reach is close). So a unit sent at a building whose far side
+    /// lies in a sealed pocket goes to the side it can reach.
+    /// </summary>
+    public bool TryResolveGoal(FixVec2 from, FixVec2 to, out Cell goal)
     {
-        var goal = Cell.Containing(_map.Bounds.Clamp(to));
-        if (!_map.IsPassable(goal) && !TryFindNearestPassable(goal, maxRadius: 12, out goal))
+        goal = Cell.Containing(_map.Bounds.Clamp(to));
+        if (_map.IsPassable(goal))
         {
-            return false;
+            return true;
         }
 
-        return CanReach(Cell.Containing(from), goal);
+        var start = Cell.Containing(from);
+        return TryFindNearestPassable(goal, maxRadius: 12, out goal, start) || TryFindNearestPassable(goal, maxRadius: 12, out goal);
     }
 
     /// <summary>
@@ -131,15 +140,14 @@ public sealed class Navigator
         mover.HasTarget = false;
 
         to = _map.Bounds.Clamp(to);
-        var goalCell = Cell.Containing(to);
         var destination = to;
-        if (!_map.IsPassable(goalCell))
+        if (!TryResolveGoal(from, to, out var goalCell))
         {
-            if (!TryFindNearestPassable(goalCell, maxRadius: 12, out goalCell))
-            {
-                return false;
-            }
+            return false;
+        }
 
+        if (goalCell != Cell.Containing(to))
+        {
             destination = goalCell.Center;
         }
 
@@ -210,7 +218,10 @@ public sealed class Navigator
     /// Finds the passable cell closest to <paramref name="around"/> (Euclidean, then scan order),
     /// searching outward ring by ring.
     /// </summary>
-    public bool TryFindNearestPassable(Cell around, int maxRadius, out Cell found)
+    public bool TryFindNearestPassable(Cell around, int maxRadius, out Cell found) => TryFindNearestPassable(around, maxRadius, out found, null);
+
+    // As above; with reachableFrom, only cells a unit there could walk to count.
+    private bool TryFindNearestPassable(Cell around, int maxRadius, out Cell found, Cell? reachableFrom)
     {
         for (var radius = 0; radius <= maxRadius; radius++)
         {
@@ -227,7 +238,7 @@ public sealed class Navigator
 
                     var cell = new Cell(around.X + dx, around.Y + dy);
                     var distance = (dx * dx) + (dy * dy);
-                    if (distance < bestDistance && _map.IsPassable(cell))
+                    if (distance < bestDistance && _map.IsPassable(cell) && (reachableFrom is not { } start || CanReach(start, cell)))
                     {
                         bestDistance = distance;
                         found = cell;
