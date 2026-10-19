@@ -410,6 +410,16 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 batch.Box(x + 0.3f, y + depth - 0.1f, width - 0.6f, 0.1f, 0.06f, height * 0.7f, Palette.Metal, Palette.Metal);
                 break;
 
+            case StructureRole.RepairBay:
+                // An open service pad in front, under a yellow gantry with a green work lamp.
+                batch.Flat(origin.X + 0.5f, origin.Y + definition.Height + 0.02f, definition.Width - 1f, 0.9f, GroundEpsilon * 2, Palette.ConcreteDark);
+                batch.Box(x + 0.25f, y + depth - 0.2f, 0.14f, 0.14f, height, height + 0.6f, Palette.HarvesterYellow, Palette.HarvesterYellow);
+                batch.Box(x + width - 0.39f, y + depth - 0.2f, 0.14f, 0.14f, height, height + 0.6f, Palette.HarvesterYellow, Palette.HarvesterYellow);
+                batch.Box(x + 0.25f, y + depth - 0.2f, width - 0.5f, 0.14f, height + 0.55f, height + 0.65f, Palette.HarvesterYellow, Palette.HarvesterYellow);
+                batch.Disc(new Vector2(center.X, y + depth - 0.13f), 0.1f, height + 0.66f, Palette.TextGood, emissive: 1f);
+                scene.AddLight(new PointLight(new Vector3(center.X, origin.Y + definition.Height + 0.4f, 1.2f + batch.Lift), 2.4f, Palette.TextGood, 0.7f));
+                break;
+
             case StructureRole.Factory:
                 // A big door on the front (+y) face and a vent stack.
                 batch.Quad(
@@ -483,6 +493,14 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 if (definition.Id == BulwarkContent.Rocketeer)
                 {
                     batch.RotatedBox(position + (new Vector2(MathF.Cos(turret + 1.2f), MathF.Sin(turret + 1.2f)) * 0.1f), 0.34f, 0.07f, turret, 0.3f, 0.37f, Palette.Metal, Palette.Metal);
+                }
+                else if (definition.Id == BulwarkContent.Medic)
+                {
+                    // A white pack with a red cross.
+                    var back = position - (new Vector2(MathF.Cos(heading), MathF.Sin(heading)) * 0.1f);
+                    batch.RotatedBox(back, 0.14f, 0.16f, heading, 0.14f, 0.34f, Palette.Text, Palette.Text);
+                    batch.RotatedBox(back, 0.1f, 0.03f, heading, 0.341f, 0.345f, Palette.HealthLow, Palette.HealthLow);
+                    batch.RotatedBox(back, 0.03f, 0.1f, heading, 0.341f, 0.345f, Palette.HealthLow, Palette.HealthLow);
                 }
                 else if (definition.Id == BulwarkContent.Pyro)
                 {

@@ -123,6 +123,7 @@ public sealed class GameContent
             hasher.Add((int)unit.ProducedBy);
             hasher.Add(unit.HarvestCapacity);
             hasher.Add(unit.Sight);
+            hasher.Add(unit.HealPerPulse);
             hasher.Add(unit.Weapon is not null);
             if (unit.Weapon is { } weapon)
             {
@@ -228,6 +229,9 @@ public sealed class GameContent
         hasher.Add(Economy.QueueCapacity);
         hasher.Add(Economy.CindriteRegrowAmount);
         hasher.Add(Economy.CindriteRegrowIntervalTicks);
+        hasher.Add(Economy.RepairIntervalTicks);
+        hasher.Add(Economy.RepairPercent);
+        hasher.Add(Economy.RepairCostPercent);
         for (var warhead = 0; warhead < Enum.GetValues<Warhead>().Length; warhead++)
         {
             for (var armor = 0; armor < Enum.GetValues<ArmorType>().Length; armor++)
@@ -264,9 +268,9 @@ public sealed class GameContent
                 throw new InvalidOperationException($"Unit '{unit.Id}' has a non-positive cost, build time, health or speed.");
             }
 
-            if (unit.Sight < 0)
+            if (unit.Sight < 0 || unit.HealPerPulse < 0)
             {
-                throw new InvalidOperationException($"Unit '{unit.Id}' has a negative sight range.");
+                throw new InvalidOperationException($"Unit '{unit.Id}' has a negative sight range or healing.");
             }
         }
 
@@ -296,6 +300,11 @@ public sealed class GameContent
             {
                 throw new InvalidOperationException($"Creature '{creature.Id}' has a non-positive health, speed, cost or weapon value.");
             }
+        }
+
+        if (Economy.RepairIntervalTicks <= 0 || Economy.RepairPercent <= 0 || Economy.RepairCostPercent < 0)
+        {
+            throw new InvalidOperationException("Repair needs a positive interval and percentage and a non-negative cost.");
         }
 
         if (Economy.CindriteRegrowAmount < 0 || Economy.CindriteRegrowIntervalTicks <= 0)

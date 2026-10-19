@@ -35,4 +35,5 @@ public enum Key
     D,
     Q,
     X,
+    R,
 }

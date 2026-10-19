@@ -28,4 +28,7 @@ public enum CommandKind : byte
 
     /// <summary>Set a production structure's rally point (<see cref="Command.Target"/>), where its new units go.</summary>
     SetRally = 8,
+
+    /// <summary>Start (<see cref="Command.TypeIndex"/> 1) or stop (0) repairing a structure.</summary>
+    Repair = 9,
 }

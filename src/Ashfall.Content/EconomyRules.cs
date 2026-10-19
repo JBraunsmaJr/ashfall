@@ -5,6 +5,18 @@ public sealed record EconomyRules
 {
     public int StartingCredits { get; init; } = 5_000;
 
+    /// <summary>Ticks between pulses of repair (structures, repair bays) and healing (medics).</summary>
+    public int RepairIntervalTicks { get; init; } = 15;
+
+    /// <summary>Hit points a pulse of repair restores, as a percentage of the maximum (at least 1).</summary>
+    public int RepairPercent { get; init; } = 2;
+
+    /// <summary>
+    /// What repair costs, as a percentage of what the hit points it restores cost new: repairing a structure from
+    /// nothing to full costs this share of its price.
+    /// </summary>
+    public int RepairCostPercent { get; init; } = 50;
+
     /// <summary>Cindrite (in credits) taken per harvest action.</summary>
     public int HarvestAmount { get; init; } = 25;
 

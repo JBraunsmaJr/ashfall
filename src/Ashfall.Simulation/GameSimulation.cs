@@ -111,6 +111,7 @@ public sealed class GameSimulation
             new PowerSystem(),
             new ConstructionSystem(),
             new ProductionSystem(),
+            new RepairSystem(),
             new CindriteRegrowthSystem(),
             new HarvestSystem(),
             new HordeSpawnSystem(),
@@ -514,6 +515,7 @@ public sealed class GameSimulation
         CommandKind.Train => ApplyTrain(command),
         CommandKind.SetStance => ApplySetStance(command),
         CommandKind.SetRally => ApplySetRally(command),
+        CommandKind.Repair => ApplyRepair(command),
         CommandKind.None => false,
         _ => false,
     };
@@ -662,6 +664,21 @@ public sealed class GameSimulation
 
         ref var mover = ref World.Get<Mover>(unit);
         Navigator.PlanRoute(unit.Index, World.Get<Position>(unit).Value, point, ref mover);
+    }
+
+    private bool ApplyRepair(in Command command)
+    {
+        if (!World.IsAlive(command.Unit)
+            || !World.Has<StructureInfo>(command.Unit)
+            || World.Get<Owner>(command.Unit).PlayerId != command.PlayerId
+            || command.TypeIndex is not (0 or 1))
+        {
+            return false;
+        }
+
+        ref var info = ref World.Get<StructureInfo>(command.Unit);
+        info.Repairing = command.TypeIndex == 1 && info.IsComplete;
+        return true;
     }
 
     private bool ApplySetRally(in Command command)

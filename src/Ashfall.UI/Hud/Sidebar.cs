@@ -49,6 +49,40 @@ public sealed class Sidebar
     /// <summary>The selection's stance when all of it shares one; null when mixed. Set by the screen.</summary>
     public UnitStance? CurrentStance { get; set; }
 
+    /// <summary>Whether the repair button shows (the player's structures are selected, and no armed units). Set by the screen.</summary>
+    public bool ShowRepair { get; set; }
+
+    /// <summary>Whether every selected structure is being repaired already. Set by the screen.</summary>
+    public bool RepairOn { get; set; }
+
+    /// <summary>Where the repair button sits: the stance row's place, full width.</summary>
+    public (float X, float Y, float Width, float Height) RepairRect()
+    {
+        var (_, y, _, height) = StanceRect(UnitStance.Guard);
+        return (Layout.X + Layout.Padding, y, Layout.Width - (2 * Layout.Padding), height);
+    }
+
+    /// <summary>True when <paramref name="point"/> is on the repair button and it shows.</summary>
+    public bool HitRepair(Vector2 point) => ShowRepair && Inside(point, RepairRect());
+
+    private void DrawRepair(Canvas canvas, SidebarLayout layout, Vector2 mouse)
+    {
+        if (!ShowRepair)
+        {
+            return;
+        }
+
+        var (x, y, width, height) = RepairRect();
+        var hovered = Inside(mouse, (x, y, width, height));
+        canvas.Rect(x, y, width, height, RepairOn ? Palette.ButtonActive : hovered ? Palette.ButtonHover : Palette.Button);
+        canvas.TextCentered(x + (width / 2f), y + ((height - (PixelFont.GlyphHeight * layout.Scale)) / 2f), RepairOn ? "REPAIRING (R)" : "REPAIR (R)",
+            layout.Scale, RepairOn ? Palette.TextGood : Palette.Text);
+        if (RepairOn)
+        {
+            canvas.Frame(x, y, width, height, layout.Scale, Palette.TextGood);
+        }
+    }
+
     /// <summary>The stance button under <paramref name="point"/>, if the buttons show.</summary>
     public UnitStance? HitStance(Vector2 point)
     {
@@ -286,13 +320,19 @@ public sealed class Sidebar
         }
 
         DrawStances(canvas, layout, mouse);
+        DrawRepair(canvas, layout, mouse);
 
         // Footer: the hovered cameo's full name and cost, and why it is unavailable (or what a hovered stance does);
         // otherwise the screen's message.
         var footerScale = layout.Scale * 1.5f;
         var lineHeight = (PixelFont.GlyphHeight + 3) * footerScale;
         var bottom = layout.Height - layout.Padding - (PixelFont.GlyphHeight * footerScale);
-        if (HitStance(mouse) is { } stanceHovered)
+        if (HitRepair(mouse))
+        {
+            canvas.Text(left, bottom - lineHeight, RepairOn ? "STOP REPAIRING" : "REPAIR", footerScale, Palette.Text);
+            canvas.Text(left, bottom, "PAYS AS IT MENDS", footerScale, Palette.TextDim);
+        }
+        else if (HitStance(mouse) is { } stanceHovered)
         {
             canvas.Text(left, bottom - lineHeight, "STANCE: " + StanceLabel(stanceHovered), footerScale, Palette.Text);
             canvas.Text(left, bottom, StanceHelp(stanceHovered), footerScale, Palette.TextDim);

@@ -17,12 +17,14 @@ public static class BulwarkContent
     public const string Barracks = "bulwark.barracks";
     public const string Factory = "bulwark.factory";
     public const string Wall = "bulwark.wall";
+    public const string RepairBay = "bulwark.repair_bay";
 
     public const string Rifleman = "bulwark.rifleman";
     public const string Rocketeer = "bulwark.rocketeer";
     public const string Warden = "bulwark.warden";
     public const string Harvester = "bulwark.harvester";
     public const string Pyro = "bulwark.pyro";
+    public const string Medic = "bulwark.medic";
 
     public static GameContent Create()
     {
@@ -52,6 +54,10 @@ public static class BulwarkContent
             // Appended: unit indices are part of the replay format.
             new(Pyro, "Pyro", Cost: 250, BuildTicks: 120, Health: 110, ArmorType.None, infantrySpeed, flamer,
                 AcquisitionRange: Fix64.FromInt(5), StructureRole.Barracks, Sight: 5),
+
+            // Unarmed: keeps the infantry around it standing (12 hit points a second to the worst hurt within 4 cells).
+            new(Medic, "Medic", Cost: 200, BuildTicks: 90, Health: 90, ArmorType.None, infantrySpeed, Weapon: null,
+                AcquisitionRange: Fix64.FromInt(4), StructureRole.Barracks, Sight: 5, HealPerPulse: 12),
         ];
 
         StructureDefinition[] structures =
@@ -70,13 +76,17 @@ public static class BulwarkContent
             // Appended. Cheap and quick so a line goes up between waves; the swarm has to chew through it.
             new(Wall, "Wall", StructureRole.Wall, Cost: 50, BuildTicks: 15, Health: 400,
                 Width: 1, Height: 1, Power: 0, Prerequisites: [StructureRole.Barracks], Sight: 0),
+
+            // Vehicles parked beside it are mended for credits.
+            new(RepairBay, "Repair Bay", StructureRole.RepairBay, Cost: 800, BuildTicks: 240, Health: 800,
+                Width: 3, Height: 3, Power: -30, Prerequisites: [StructureRole.Factory]),
         ];
 
         FactionDefinition[] factions =
         [
             new(FactionId, "Bulwark Directorate", ConstructionYard,
-                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory, Wall],
-                UnitIds: [Rifleman, Rocketeer, Warden, Harvester, Pyro]),
+                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory, Wall, RepairBay],
+                UnitIds: [Rifleman, Rocketeer, Warden, Harvester, Pyro, Medic]),
         ];
 
         return new GameContent(units, structures, factions, new EconomyRules());

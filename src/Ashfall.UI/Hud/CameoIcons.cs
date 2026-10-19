@@ -94,6 +94,21 @@ public static class CameoIcons
                 icon.Oval(0.78f, 0.47f, 0.06f, 0.05f, Palette.CindriteHot, glow: true);
                 break;
 
+            case BulwarkContent.Medic:
+                Soldier(icon, 0.5f, Palette.Text);
+                icon.Fill(0.47f, 0.42f, 0.06f, 0.16f, Palette.HealthLow);
+                icon.Fill(0.42f, 0.47f, 0.16f, 0.06f, Palette.HealthLow);
+                break;
+
+            case BulwarkContent.RepairBay:
+                icon.Box(0.14f, 0.5f, 0.72f, 0.3f, Palette.Concrete);
+                icon.Fill(0.14f, 0.54f, 0.72f, 0.04f, team);
+                icon.Fill(0.2f, 0.24f, 0.05f, 0.3f, Palette.HarvesterYellow);
+                icon.Fill(0.75f, 0.24f, 0.05f, 0.3f, Palette.HarvesterYellow);
+                icon.Fill(0.2f, 0.22f, 0.6f, 0.05f, Palette.HarvesterYellow);
+                icon.Oval(0.5f, 0.3f, 0.04f, 0.04f, Palette.TextGood, glow: true);
+                break;
+
             case BulwarkContent.Warden:
                 icon.Box(0.16f, 0.62f, 0.68f, 0.14f, Palette.Metal);
                 icon.Box(0.2f, 0.5f, 0.6f, 0.14f, team);

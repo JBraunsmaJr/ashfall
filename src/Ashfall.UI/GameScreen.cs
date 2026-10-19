@@ -341,6 +341,11 @@ public sealed class GameScreen
             return;
         }
 
+        if (input.WasPressed(Key.R))
+        {
+            ToggleRepair();
+        }
+
         if (input.WasPressed(Key.G) && HasArmedSelection())
         {
             // Cycles guard, hold ground, free (from the selection's stance, or guard when it is mixed).
@@ -475,6 +480,12 @@ public sealed class GameScreen
 
         if (!input.WasPressed(MouseButton.Left) || _orders is null)
         {
+            return;
+        }
+
+        if (_sidebar.HitRepair(input.Mouse))
+        {
+            ToggleRepair();
             return;
         }
 
@@ -777,13 +788,34 @@ public sealed class GameScreen
         var ground = PickGround(mouse);
         var cell = new Cell((int)MathF.Floor(ground.X), (int)MathF.Floor(ground.Y));
         var structureIndex = Simulation.Map.StructureAt(cell);
-        if (structureIndex < 0 || _fog.At(cell.X, cell.Y) <= 0f)
+        if (structureIndex >= 0 && _fog.At(cell.X, cell.Y) > 0f && world.IsAlive(world.EntityAt(structureIndex)))
         {
-            return Entity.None;
+            return world.EntityAt(structureIndex);
         }
 
-        var structure = world.EntityAt(structureIndex);
-        return world.IsAlive(structure) ? structure : Entity.None;
+        // A building's body stands up off its footprint: a click on its walls or roof lands on the ground behind it,
+        // so also take the building whose middle (half way up) is nearest the click.
+        foreach (var index in world.Store<StructureInfo>().EntityIndices)
+        {
+            var info = world.Store<StructureInfo>().Get(index);
+            var definition = Simulation.Content.Structure(info.StructureType);
+            if (_fog.At(info.Origin.X, info.Origin.Y) <= 0f)
+            {
+                continue;
+            }
+
+            var middle = new Vector2(info.Origin.X + (definition.Width / 2f), info.Origin.Y + (definition.Height / 2f));
+            var screen = Camera.WorldToScreen(new Vector3(middle, (WorldPainter.StructureHeight(definition.Role) / 2f) + GroundHeight(middle)));
+            var radius = 16f * Math.Max(definition.Width, definition.Height) * Camera.Zoom;
+            var distance = Vector2.Distance(screen, mouse);
+            if (distance < radius && distance < bestDistance)
+            {
+                best = world.EntityAt(index);
+                bestDistance = distance;
+            }
+        }
+
+        return best;
     }
 
     private Entity PickProducer(int unitType)
@@ -903,6 +935,23 @@ public sealed class GameScreen
     {
         var world = Simulation.World;
 
+        // Structures under repair: a green plus bobbing over the roof.
+        foreach (var index in world.Store<StructureInfo>().EntityIndices)
+        {
+            var info = world.Store<StructureInfo>().Get(index);
+            if (!info.Repairing || Simulation.AreEnemies(Player, world.Store<Owner>().Get(index).PlayerId))
+            {
+                continue;
+            }
+
+            var definition = Simulation.Content.Structure(info.StructureType);
+            var middle = new Vector2(info.Origin.X + (definition.Width / 2f), info.Origin.Y + (definition.Height / 2f));
+            var bob = MathF.Sin((float)_now * 4f) * 3f;
+            var at = Camera.WorldToScreen(new Vector3(middle, WorldPainter.StructureHeight(definition.Role) + 1.4f + GroundHeight(middle))) + new Vector2(0, bob);
+            canvas.Rect(at.X - 6, at.Y - 2, 12, 4, Palette.TextGood);
+            canvas.Rect(at.X - 2, at.Y - 6, 4, 12, Palette.TextGood);
+        }
+
         // Rally points of the selected producers: a line from the door to a flag.
         foreach (var entity in _selection)
         {
@@ -999,8 +1048,8 @@ public sealed class GameScreen
         // Help and status, bottom-left of the view.
         var scale = _sidebar.Layout.Scale;
         var help = Networked
-            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS"
-            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  +/- SPEED  P PAUSE";
+            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR"
+            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR  +/- SPEED  P PAUSE";
         canvas.TextShadowed(8 * scale, _framebuffer.Y - (14 * scale), help, scale, Palette.TextDim);
         var tick = Simulation.Tick;
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);
@@ -1291,6 +1340,32 @@ public sealed class GameScreen
     {
         _sidebar.ShowStances = _orders is not null && HasArmedSelection();
         _sidebar.CurrentStance = SelectionStance();
+        var structures = SelectedStructures().ToList();
+        _sidebar.ShowRepair = _orders is not null && !_sidebar.ShowStances && structures.Count > 0;
+        _sidebar.RepairOn = structures.Count > 0 && structures.All(entity => Simulation.World.Get<StructureInfo>(entity).Repairing);
+    }
+
+    // The player's own finished structures in the selection.
+    private IEnumerable<Entity> SelectedStructures() => _selection.Where(entity =>
+        Simulation.World.IsAlive(entity) && Simulation.World.Has<StructureInfo>(entity) && OwnerOf(entity) == Player
+        && Simulation.World.Get<StructureInfo>(entity).IsComplete);
+
+    // Repair on for every selected structure, or (when all are being repaired already) off for all of them.
+    private void ToggleRepair()
+    {
+        var structures = SelectedStructures().ToList();
+        if (_orders is null || structures.Count == 0)
+        {
+            return;
+        }
+
+        var on = !structures.All(entity => Simulation.World.Get<StructureInfo>(entity).Repairing);
+        foreach (var structure in structures)
+        {
+            _orders.Enqueue(Command.Repair(Player, structure, on));
+        }
+
+        Say(on ? "REPAIRING" : "REPAIR STOPPED", Palette.Text);
     }
 
     private bool HasArmedSelection() => _selection.Any(entity => Simulation.World.IsAlive(entity) && Simulation.World.Has<Armament>(entity));

@@ -77,6 +77,8 @@ public class SidebarTabsAndCameraTests
         Assert.Equal(SidebarTab.Infantry, tabs[BulwarkContent.Pyro]);
         Assert.Equal(SidebarTab.Vehicles, tabs[BulwarkContent.Warden]);
         Assert.Equal(SidebarTab.Vehicles, tabs[BulwarkContent.Harvester]);
+        Assert.Equal(SidebarTab.Infantry, tabs[BulwarkContent.Medic]);
+        Assert.Equal(SidebarTab.Base, tabs[BulwarkContent.RepairBay]);
         Assert.DoesNotContain(BulwarkContent.ConstructionYard, tabs.Keys);
         Assert.Equal("Warden light tank", ui.Entry("WARDEN").Name);
     }

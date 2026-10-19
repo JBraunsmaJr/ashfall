@@ -17,4 +17,7 @@ public enum StructureRole : byte
     /// not extend where the player may build.
     /// </summary>
     Wall = 6,
+
+    /// <summary>Mends the owner's vehicles parked beside it, for credits.</summary>
+    RepairBay = 7,
 }

@@ -45,7 +45,7 @@ public class ContentTests
         {
             var unit = content.Unit(content.UnitIndex(id));
             Assert.Contains(faction.StructureIds, structure => content.Structure(content.StructureIndex(structure)).Role == unit.ProducedBy);
-            Assert.True(unit.Weapon is not null || unit.HarvestCapacity > 0, $"{unit.Name} neither fights nor harvests.");
+            Assert.True(unit.Weapon is not null || unit.HarvestCapacity > 0 || unit.IsMedic, $"{unit.Name} neither fights, harvests nor heals.");
         }
 
         Assert.Equal(BulwarkContent.Harvester, content.Structure(content.StructureIndex(BulwarkContent.Refinery)).FreeUnitId);
