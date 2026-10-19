@@ -42,6 +42,11 @@ if (options.IsNetwork)
     return NetworkRunner.Run(options, cancellation.Token);
 }
 
+if (options.Campaign)
+{
+    return await CampaignHeadless.RunAsync(options, cancellation.Token).ConfigureAwait(false);
+}
+
 var spec = options.ToMatchSpec();
 Console.WriteLine(spec.Mode switch
 {

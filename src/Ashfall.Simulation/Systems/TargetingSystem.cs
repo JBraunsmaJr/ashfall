@@ -1,6 +1,7 @@
 ﻿using Ashfall.Core;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Map;
 using Ashfall.Simulation.Orders;
 
 namespace Ashfall.Simulation.Systems;
@@ -12,6 +13,10 @@ namespace Ashfall.Simulation.Systems;
 /// range); turns an idle unit on whoever shoots it; closes to weapon range; and resumes an attack-move when its
 /// target dies. A unit whose move has arrived is idle again.
 /// </summary>
+/// <remarks>
+/// A unit on its own never picks, and gives up, an enemy it can neither shoot from where it stands nor walk to (one
+/// in a pocket of ground its feet cannot reach): chasing it would only replan a route that never arrives.
+/// </remarks>
 /// <remarks>
 /// An idle unit's <see cref="UnitStance"/> sets how far it goes on its own: <see cref="UnitStance.Guard"/> chases a
 /// short way (<see cref="GuardLeash"/> beyond its acquisition range from where it stood) and walks back,
@@ -94,10 +99,16 @@ public sealed class TargetingSystem : ISystem
                     armament.Target = attacker;
                 }
 
+                if (!armament.Target.IsNone && !CanChase(context, position, armament.Target, weapon.Range))
+                {
+                    armament.Target = Entity.None; // out of range and out of reach: let it go
+                }
+
                 if (context.IsStaggeredTick(unit.Index, ScanPeriod) && (armament.Target.IsNone || world.Has<StructureInfo>(armament.Target)))
                 {
                     // A building it picked for itself is dropped as soon as something that fights back comes into range.
-                    var found = FindNearestEnemy(context, _candidates, owner, position, reach, structures: armament.Target.IsNone);
+                    var found = FindNearestEnemy(context, _candidates, owner, position, reach, structures: armament.Target.IsNone,
+                        walker: stance == UnitStance.HoldGround ? null : weapon.Range);
                     if (!found.IsNone || armament.Target.IsNone)
                     {
                         armament.Target = found;
@@ -215,6 +226,14 @@ public sealed class TargetingSystem : ISystem
         }
     }
 
+    // An enemy is worth chasing if it is in weapon range already or on ground the unit can walk to (for a structure:
+    // the free ground beside the nearest point of its footprint).
+    private static bool CanChase(in TickContext context, FixVec2 position, Entity target, Fix64 weaponRange)
+    {
+        var at = context.Simulation.ClosestPointOf(target, position);
+        return InRange(position, at, weaponRange) || context.Navigator.CanReach(position, at);
+    }
+
     /// <summary>True when <paramref name="point"/> is within <paramref name="range"/> of <paramref name="from"/>.</summary>
     public static bool InRange(FixVec2 from, FixVec2 point, Fix64 range) =>
         FixVec2.DistanceSquared(from, point) <= range * range;
@@ -233,7 +252,19 @@ public sealed class TargetingSystem : ISystem
             return;
         }
 
-        if (!mover.HasTarget || context.IsStaggeredTick(unit.Index, ChasePeriod))
+        // A fresh chase plans at once; otherwise re-plan every few ticks as the target moves. One standing where its
+        // last route ended, or with no route that arrives (an explicit attack on something out of reach), waits for the
+        // re-plan too: planning again every tick would find the same route that falls short.
+        var replan = context.IsStaggeredTick(unit.Index, ChasePeriod);
+        if (!replan && !mover.HasTarget)
+        {
+            var stuck = FixVec2.DistanceSquared(position, mover.Target) <= AtPostSquared && context.Navigator.Paths.CountFor(unit.Index) == 0
+                && Cell.Containing(position) != Cell.Containing(aimPoint)
+                && !context.Navigator.CanReach(position, aimPoint);
+            replan = !stuck;
+        }
+
+        if (replan)
         {
             context.Navigator.PlanRoute(unit.Index, position, aimPoint, ref mover);
         }
@@ -273,9 +304,14 @@ public sealed class TargetingSystem : ISystem
     /// the answer is exactly what a scan of every entity would give, at a fraction of the cost.
     /// </remarks>
     /// <param name="structures">False to consider only units and creatures.</param>
+    /// <param name="walker">
+    /// For a scanner that moves: its weapon range. Units and creatures beyond it on ground the scanner cannot walk to
+    /// are skipped. Null for one that stays put (turrets, bunkers, holding ground).
+    /// </param>
     internal static Entity FindNearestEnemy(
-        in TickContext context, List<Candidate> candidates, int owner, FixVec2 position, Fix64 range, bool structures = true)
+        in TickContext context, List<Candidate> candidates, int owner, FixVec2 position, Fix64 range, bool structures = true, Fix64? walker = null)
     {
+        var weaponSquared = walker is { } weaponRange ? weaponRange * weaponRange : Fix64.Zero;
         var world = context.World;
         var simulation = context.Simulation;
         var healths = world.Store<Health>();
@@ -290,8 +326,10 @@ public sealed class TargetingSystem : ISystem
                 continue;
             }
 
-            var distance = FixVec2.DistanceSquared(position, simulation.ClosestPointOf(world.EntityAt(index), position));
-            if (distance <= rangeSquared)
+            var closest = simulation.ClosestPointOf(world.EntityAt(index), position);
+            var distance = FixVec2.DistanceSquared(position, closest);
+            if (distance <= rangeSquared
+                && (walker is null || distance <= weaponSquared || context.Navigator.CanReach(position, closest)))
             {
                 candidates.Add(new Candidate(healths.SlotOf(index), index, distance, IsStructure: true));
             }
@@ -311,8 +349,10 @@ public sealed class TargetingSystem : ISystem
                         continue;
                     }
 
-                    var distance = FixVec2.DistanceSquared(position, positions.Get(index).Value);
-                    if (distance <= rangeSquared)
+                    var at = positions.Get(index).Value;
+                    var distance = FixVec2.DistanceSquared(position, at);
+                    if (distance <= rangeSquared
+                        && (walker is null || distance <= weaponSquared || context.Navigator.CanReach(position, at)))
                     {
                         candidates.Add(new Candidate(healths.SlotOf(index), index, distance, IsStructure: false));
                     }

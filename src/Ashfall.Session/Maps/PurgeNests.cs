@@ -9,7 +9,8 @@ namespace Ashfall.Session.Maps;
 /// the fissure of a Cindrite field or out on open ground. A pit on open ground brings its own blight: a small field
 /// rising from a fissure beside it, so every nest has something to feed on that keeps regrowing until the players
 /// take it. Sites are chosen far from the bases and spread out from each other; the players' own fields are never
-/// infested.
+/// infested. A nest only goes where the players can walk up to it: never in a pocket of ground sealed off from the
+/// bases, where no ground unit could ever destroy it.
 /// </summary>
 public static class PurgeNests
 {
@@ -51,6 +52,9 @@ public static class PurgeNests
         var pit = nestType;
         var footprint = simulation.Content.Structure(pit);
         var far = MinimumDistance * MinimumDistance;
+
+        // Ground beside the first base, to test that each nest can be walked to from it.
+        var home = playerStarts.Count > 0 && simulation.Navigator.TryFindNearestPassable(playerStarts[0], 8, out var free) ? free : (Cell?)null;
 
         // Every field's fissure, then open ground on a coarse grid, as long as it is far enough from every base.
         var candidates = new List<(Cell Anchor, bool Fissure)>();
@@ -115,6 +119,11 @@ public static class PurgeNests
                 }
             }
 
+            if (home is { } from && !Approachable(simulation, from, origin, footprint.Width, footprint.Height))
+            {
+                continue; // sealed off from the bases
+            }
+
             for (var y = 0; y < footprint.Height; y++)
             {
                 for (var x = 0; x < footprint.Width; x++)
@@ -134,6 +143,25 @@ public static class PurgeNests
         }
 
         return placed;
+    }
+
+    // True if some free cell around the footprint can be walked to from the base.
+    private static bool Approachable(GameSimulation simulation, Cell from, Cell origin, int width, int height)
+    {
+        for (var y = origin.Y - 1; y <= origin.Y + height; y++)
+        {
+            for (var x = origin.X - 1; x <= origin.X + width; x++)
+            {
+                var cell = new Cell(x, y);
+                var edge = x < origin.X || y < origin.Y || x >= origin.X + width || y >= origin.Y + height;
+                if (edge && simulation.Map.IsPassable(cell) && simulation.Navigator.CanReach(from, cell))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     // A small field rising from a fissure beside a nest on open ground, on clear unbuilt cells only.

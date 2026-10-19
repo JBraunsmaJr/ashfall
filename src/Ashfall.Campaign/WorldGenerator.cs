@@ -157,9 +157,14 @@ public static class WorldGenerator
         }
 
         var theatres = new Theatre[theatreCount];
+        var theatreNames = new HashSet<string>(StringComparer.Ordinal);
         for (var theatre = 0; theatre < theatreCount; theatre++)
         {
-            theatres[theatre] = new Theatre(theatre, TheatreName(members[theatre], points, theatreBiome[theatre]), theatreBiome[theatre], members[theatre], hives[theatre]);
+            // Two theatres of one biome on the same side of the map: the second is the "Far" one.
+            var name = TheatreName(members[theatre], points, theatreBiome[theatre]);
+            name = theatreNames.Add(name) ? name : "Far " + name;
+            theatreNames.Add(name);
+            theatres[theatre] = new Theatre(theatre, name, theatreBiome[theatre], members[theatre], hives[theatre]);
         }
 
         return new WorldMap(regions, theatres, home);

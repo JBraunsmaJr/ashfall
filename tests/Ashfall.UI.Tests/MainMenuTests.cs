@@ -269,11 +269,45 @@ public class MainMenuTests
     }
 
     [Fact]
-    public void Purge_leads_the_main_menu_and_starts_a_coop_game_on_a_generated_map()
+    public void The_campaign_leads_the_main_menu_and_starts_new_or_continues()
+    {
+        var menu = new MenuDriver(new MenuSettings { CampaignSeed = 77, CampaignAllies = 1 });
+        Assert.Equal("CAMPAIGN", menu.Screen.Targets.First().Label);
+        menu.Press(Key.Enter); // the primary button on the title screen
+        Assert.Equal("Campaign", menu.Screen.CurrentPage);
+        Assert.DoesNotContain(menu.Screen.Targets, target => target.Label == "CONTINUE"); // nothing saved
+
+        menu.Click("QUICK");
+        menu.Click("VETERAN"); // the Maw's difficulty cycles on each click
+        menu.Click("+", 0);
+        menu.Click("WORLD SEED");
+        menu.Press(Key.Backspace);
+        menu.Press(Key.Backspace);
+        Assert.False(menu.Enabled("NEW CAMPAIGN"));
+        menu.Type("12");
+        menu.Press(Key.Enter);
+
+        var choice = Assert.IsType<MenuChoice>(menu.Screen.Choice);
+        Assert.Equal(MenuAction.Campaign, choice.Action);
+        Assert.True(choice.NewCampaign);
+        Assert.Equal(("quick", MawDifficulty.Elite, 12u, 2), (choice.Settings.CampaignRules, choice.Settings.CampaignDifficulty, choice.Settings.CampaignSeed, choice.Settings.CampaignAllies));
+        var reloaded = MenuSettings.Parse(choice.Settings.Serialize());
+        Assert.Equal(("quick", MawDifficulty.Elite, 12u, 2), (reloaded.CampaignRules, reloaded.CampaignDifficulty, reloaded.CampaignSeed, reloaded.CampaignAllies));
+
+        // With a save, CONTINUE is offered first and a new campaign comes with a warning.
+        var saved = new MenuDriver(new MenuSettings(), saved: "ASH-0G000-0041E, STANDARD, TURN 3");
+        saved.Click("CAMPAIGN");
+        Assert.Contains(saved.Screen.Targets, target => target.Label == "CONTINUE");
+        saved.Press(Key.Enter);
+        Assert.Equal(MenuAction.Campaign, saved.Screen.Choice?.Action);
+        Assert.False(saved.Screen.Choice!.NewCampaign);
+    }
+
+    [Fact]
+    public void Purge_starts_a_coop_game_on_a_generated_map()
     {
         var menu = new MenuDriver(new MenuSettings { Map = null, PurgeAllies = 1, PurgeNests = 4 });
-        Assert.Equal("PURGE", menu.Screen.Targets.First().Label);
-        menu.Press(Key.Enter); // the primary button on the title screen
+        menu.Click("PURGE");
         Assert.Equal("Purge", menu.Screen.CurrentPage);
 
         // A Purge needs a generated map: the hand-made one is not offered, and one is picked on arrival.
@@ -308,9 +342,9 @@ public class MainMenuTests
         private readonly InputState _input = new() { Mouse = new Vector2(5, 5) };
         private double _time;
 
-        public MenuDriver(MenuSettings settings, string? message = null)
+        public MenuDriver(MenuSettings settings, string? message = null, string? saved = null)
         {
-            Screen = new MainMenuScreen(settings, message) { Preview = new MapPreview { Synchronous = true } };
+            Screen = new MainMenuScreen(settings, message) { Preview = new MapPreview { Synchronous = true }, SavedCampaign = saved };
             Frame();
         }
 

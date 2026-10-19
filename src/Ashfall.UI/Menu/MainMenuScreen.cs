@@ -7,12 +7,13 @@ using Ashfall.UI.Drawing;
 using Ashfall.UI.Input;
 using Ashfall.UI.Text;
 
+using Ashfall.Campaign;
 using Ashfall.Simulation.Horde;
 
 namespace Ashfall.UI.Menu;
 
 /// <summary>
-/// The title screen: start a co-op Purge against the Maw or a skirmish, host a lobby or join one by
+/// The title screen: continue or start the co-op campaign, start a Purge against the Maw or a skirmish, host a lobby or join one by
 /// address, without any command-line flags. Purge, Skirmish and Host also pick the map: a generated
 /// archetype with its seed and sliders (or, outside a Purge, the hand-made map), previewed live as
 /// they change. Each page is laid out fresh every frame from the same widget
@@ -32,6 +33,7 @@ public sealed class MainMenuScreen
     private readonly TextField _address = new("ADDRESS", 64, TextField.IsAddressChar);
     private readonly TextField _mapSeed = new("MAP SEED", 10, char.IsAsciiDigit);
     private readonly TextField _mapCode = new("CODE", 28, c => char.IsAsciiLetterOrDigit(c) || c == '-');
+    private readonly TextField _campaignSeed = new("WORLD SEED", 10, char.IsAsciiDigit);
     private readonly IReadOnlyList<string> _recentHosts;
     private readonly int[] _sliders = new int[MapSettings.SliderCount];
     private MapArchetype? _archetype;
@@ -42,6 +44,9 @@ public sealed class MainMenuScreen
     private int _allies;
     private int _nests;
     private MawDifficulty _difficulty;
+    private CampaignRules _campaignRules;
+    private MawDifficulty _campaignDifficulty;
+    private int _campaignAllies;
     private MapSlider? _dragging;
     private Vector2 _framebuffer = new(1280, 720);
     private Vector2 _mouse;
@@ -62,6 +67,10 @@ public sealed class MainMenuScreen
         _allies = settings.PurgeAllies;
         _nests = settings.PurgeNests;
         _difficulty = settings.PurgeDifficulty;
+        _campaignRules = CampaignRuleSets.Find(settings.CampaignRules) ?? CampaignRuleSets.Standard;
+        _campaignDifficulty = settings.CampaignDifficulty;
+        _campaignAllies = settings.CampaignAllies;
+        _campaignSeed.Text = settings.CampaignSeed.ToString(CultureInfo.InvariantCulture);
         SetMap(settings.Map);
         Message = message;
     }
@@ -69,6 +78,7 @@ public sealed class MainMenuScreen
     private enum Page
     {
         Main,
+        Campaign,
         Purge,
         Skirmish,
         Host,
@@ -81,7 +91,10 @@ public sealed class MainMenuScreen
     /// <summary>A line shown under the main buttons, e.g. why the last connection failed.</summary>
     public string? Message { get; set; }
 
-    /// <summary>The page on screen: Main, Purge, Skirmish, Host or Join.</summary>
+    /// <summary>One line describing the saved campaign (offered as CONTINUE), or null if there is none.</summary>
+    public string? SavedCampaign { get; init; }
+
+    /// <summary>The page on screen: Main, Campaign, Purge, Skirmish, Host or Join.</summary>
     public string CurrentPage => _page.ToString();
 
     /// <summary>The live map preview on the Skirmish and Host pages.</summary>
@@ -104,6 +117,10 @@ public sealed class MainMenuScreen
         PurgeAllies = _allies,
         PurgeNests = _nests,
         PurgeDifficulty = _difficulty,
+        CampaignRules = _campaignRules.Id,
+        CampaignDifficulty = _campaignDifficulty,
+        CampaignSeed = CampaignSeed ?? 1,
+        CampaignAllies = _campaignAllies,
         Map = Map,
         RecentHosts = _recentHosts,
     };
@@ -462,13 +479,13 @@ public sealed class MainMenuScreen
         {
             case Page.Main:
             {
-                _labels.Add((center, y, "BULWARK DIRECTORATE - PURGE THE MAW, SKIRMISH, PEER-TO-PEER", 1.5f * scale, Palette.TextDim, true));
+                _labels.Add((center, y, "BULWARK DIRECTORATE - TAKE THE WORLD BACK FROM THE MAW", 1.5f * scale, Palette.TextDim, true));
                 y += 34 * scale;
                 var buttonWidth = Math.Min(innerWidth, 300 * scale);
-                foreach (var (label, page) in new[] { ("PURGE", Page.Purge), ("SKIRMISH", Page.Skirmish), ("HOST GAME", Page.Host), ("JOIN GAME", Page.Join) })
+                foreach (var (label, page) in new[] { ("CAMPAIGN", Page.Campaign), ("PURGE", Page.Purge), ("SKIRMISH", Page.Skirmish), ("HOST GAME", Page.Host), ("JOIN GAME", Page.Join) })
                 {
                     var target = page;
-                    _widgets.Add(new Widget(center - (buttonWidth / 2), y, buttonWidth, buttonHeight + (4 * scale), label, () => Go(target), true) { Primary = page == Page.Purge });
+                    _widgets.Add(new Widget(center - (buttonWidth / 2), y, buttonWidth, buttonHeight + (4 * scale), label, () => Go(target), true) { Primary = page == Page.Campaign });
                     y += buttonHeight + (16 * scale);
                 }
 
@@ -483,6 +500,51 @@ public sealed class MainMenuScreen
                     }
                 }
 
+                break;
+            }
+
+            case Page.Campaign:
+            {
+                Heading("CAMPAIGN");
+                if (SavedCampaign is not null)
+                {
+                    Note("SAVED: " + SavedCampaign.ToUpperInvariant(), Palette.Text);
+                    _widgets.Add(new Widget(x0, y, columnWidth, buttonHeight, "CONTINUE", () => Choice = new MenuChoice(MenuAction.Campaign, Settings), true) { Primary = true });
+                    y += buttonHeight + (18 * scale);
+                }
+
+                _labels.Add((x0, y, "NEW CAMPAIGN", 2 * scale, Palette.Credits, false));
+                y += 24 * scale;
+                Choices("RULES", CampaignRuleSets.All.Select(rules =>
+                {
+                    var target = rules;
+                    return (rules.Name.ToUpperInvariant(), _campaignRules == rules, (Action)(() => _campaignRules = target));
+                }).ToList());
+                Choices("THE MAW", [(_campaignDifficulty.ToString().ToUpperInvariant(), true, () => _campaignDifficulty = (MawDifficulty)(((int)_campaignDifficulty + 1) % 4))]);
+                _labels.Add((x0, y + (8 * scale), _campaignSeed.Label, 2 * scale, Palette.TextDim, false));
+                _widgets.Add(new Widget(x0 + (130 * scale), y, columnWidth - (250 * scale), rowHeight, string.Empty, null, true) { Field = _campaignSeed });
+                _widgets.Add(new Widget(x0 + columnWidth - (110 * scale), y, 110 * scale, rowHeight, "RANDOM", RandomCampaignSeed, true));
+                y += rowHeight + (10 * scale);
+                Stepper("AI ALLIES", _campaignAllies, () => _campaignAllies--, _campaignAllies > 0, () => _campaignAllies++, _campaignAllies + 1 < Ashfall.Session.MatchSpec.PurgeMaxPlayers);
+                var seed = CampaignSeed;
+                Note(seed is { } s
+                    ? string.Create(CultureInfo.InvariantCulture,
+                        $"CODE {CampaignCode.For(s, _campaignRules, _campaignDifficulty)}. {_campaignRules.MinRegions}-{_campaignRules.MaxRegions} REGIONS IN {_campaignRules.MinTheatres}-{_campaignRules.MaxTheatres} THEATRES, ONE HIVE EACH. CHOOSE WHERE TO FIGHT; EVERY MISSION, WON OR LOST, IS A TURN. THE MAW SPREADS BETWEEN TURNS; DESTROY EVERY HIVE BEFORE THE INFESTATION METER FILLS.")
+                    : "ENTER A NUMBER FOR THE WORLD SEED.", seed is null ? Palette.TextWarn : Palette.TextDim);
+                if (SavedCampaign is not null)
+                {
+                    Note("STARTING A NEW CAMPAIGN REPLACES THE SAVED ONE.", Palette.TextWarn);
+                }
+
+                y += 10 * scale;
+                var half = Math.Min((innerWidth - (16 * scale)) / 2, 260 * scale);
+                var right = inner + innerWidth;
+                _widgets.Add(new Widget(right - (2 * half) - (16 * scale), y, half, buttonHeight, "BACK", () => Go(Page.Main), true));
+                _widgets.Add(new Widget(right - half, y, half, buttonHeight, "NEW CAMPAIGN", () => Choice = new MenuChoice(MenuAction.Campaign, Settings) { NewCampaign = true }, seed is not null)
+                {
+                    Primary = SavedCampaign is null,
+                });
+                y += buttonHeight + (14 * scale);
                 break;
             }
 
@@ -598,6 +660,11 @@ public sealed class MainMenuScreen
         _contentBottom = y;
     }
 
+    private uint? CampaignSeed => uint.TryParse(_campaignSeed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var seed) ? seed : null;
+
+    private void RandomCampaignSeed() =>
+        _campaignSeed.Text = ((uint)Random.Shared.Next(1, int.MaxValue)).ToString(CultureInfo.InvariantCulture);
+
     private bool MapOk() => _archetype is null || uint.TryParse(_mapSeed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out _);
 
     private void SetMap(MapSettings? map)
@@ -649,7 +716,7 @@ public sealed class MainMenuScreen
 
     private void Focus(TextField? field)
     {
-        foreach (var f in new[] { _name, _seed, _port, _address, _mapSeed, _mapCode })
+        foreach (var f in new[] { _name, _seed, _port, _address, _mapSeed, _mapCode, _campaignSeed })
         {
             f.Focused = f == field;
         }

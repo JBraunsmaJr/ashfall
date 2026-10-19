@@ -103,6 +103,13 @@ jobs:
           --hash-out campaign-${{ runner.os }}.hash
           --sheet campaign-${{ runner.os }}.png
 
+      - name: Campaign missions (M8) - three real missions with scripted AIs, saved after every turn
+        run: >
+          dotnet run --project src/Ashfall.Headless -c Release --no-build --
+          --mode campaign --campaign-rules quick --seed 3 --difficulty recruit --missions 3 --players 2
+          --campaign-save campaign-run-${{ runner.os }}.save
+          --hash-out campaign-run-${{ runner.os }}.hash
+
       - name: LAN match (M3 gate) - four separate processes over UDP, no desyncs, replay verified
         shell: bash
         run: |
@@ -121,6 +128,7 @@ jobs:
             nests-${{ runner.os }}.*
             purge-${{ runner.os }}.*
             campaign-${{ runner.os }}.hash
+            campaign-run-${{ runner.os }}.*
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet
@@ -222,6 +230,20 @@ jobs:
           fi
           grep -q "simulation at tick 47" purge.log
 
+      - name: Render the campaign screen with validation
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            dotnet run --project src/Ashfall.Client -c Release --no-build -- \
+              --campaign-code ASH-0G000-00M1E --campaign-save campaign-smoke.save \
+              --frames 60 --validation --screenshot render-campaign.png 2>&1 | tee campaign.log
+          if grep -q "Validation Error" campaign.log; then
+            echo "::error::Vulkan validation reported errors (see campaign.log above)."
+            exit 1
+          fi
+          test -s render-campaign.png
+          grep -q "^code ASH-0G000-00M1E" campaign-smoke.save
+
       - name: Upload frames
         if: always()
         uses: actions/upload-artifact@v4
@@ -264,6 +286,11 @@ jobs:
           else
             echo "::error::Campaigns ended differently on Linux and Windows. First difference:"
             head -n 4 campaign.diff
+            status=1
+          fi
+          echo "Three played missions: Linux $(cat campaign-run-Linux.hash), Windows $(cat campaign-run-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"
+          if ! diff campaign-run-Linux.save campaign-run-Windows.save > /dev/null; then
+            echo "::error::The played campaign missions ended differently on Linux and Windows."
             status=1
           fi
           echo "## LAN match (4 processes) final state" >> "$GITHUB_STEP_SUMMARY"

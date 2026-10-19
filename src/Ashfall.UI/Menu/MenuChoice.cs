@@ -8,4 +8,7 @@ public sealed record MenuChoice(MenuAction Action, MenuSettings Settings)
 
     /// <summary>For <see cref="MenuAction.Join"/>: the port to connect to.</summary>
     public int JoinPort { get; init; }
+
+    /// <summary>For <see cref="MenuAction.Campaign"/>: start a new campaign from the settings rather than continue the saved one.</summary>
+    public bool NewCampaign { get; init; }
 }

@@ -1,4 +1,5 @@
-using System.Globalization;
+﻿using System.Globalization;
+using Ashfall.Campaign;
 using Ashfall.MapGen;
 using Ashfall.Session;
 using Ashfall.Simulation.Horde;
@@ -18,6 +19,7 @@ internal sealed record HeadlessOptions
                                   swarm: horde stress test, a Bulwark fortress against the Maw (M5)
                                   purge: co-op scripted AIs against Maw nests on a generated map, run until
                                   the nests or the players are gone
+                                  campaign: play campaign missions with scripted AIs (see Campaign below)
           --seed <n>              Match seed (default 20261017)
           --ticks <n>             Proving: ticks to run (default 1800 = 2 minutes of game time)
                                   Skirmish: tick limit (default 54000 = 60 minutes); exit code 3 if no winner
@@ -49,6 +51,16 @@ internal sealed record HeadlessOptions
           --replay <file>         Play a replay and check it reaches its recorded final hash
           -h, --help              Show this help
 
+        Campaign (GDD section 7): each mission is a real Purge played by --players scripted AIs; the
+        autopilot picks the targets. The save is written after every turn.
+          --campaign-code <code>  Start this campaign (e.g. ASH-0G000-0041E); otherwise --seed, --difficulty and
+                                  --campaign-rules make one
+          --campaign-rules <id>   standard (default) or quick
+          --campaign-save <file>  Continue the campaign saved here (if the file exists) and save every turn to it
+          --missions <n>          Missions to play (default: until the campaign is won or lost)
+          (--ticks is the tick limit per mission; one reached counts as a lost mission. --hash-out writes the
+          campaign-state hash.)
+
         Network play (scripted-AI bots over UDP; every bot runs the full lockstep protocol):
           --host                  Host a lobby and start once every slot is filled
           --humans <n>            With --host: network players including the host (default 2)
@@ -78,7 +90,7 @@ internal sealed record HeadlessOptions
     /// <summary>Explicit --ticks value, if given.</summary>
     public long? TicksOption { get; init; }
 
-    public long Ticks => TicksOption ?? (Mode is MatchMode.Skirmish or MatchMode.Purge ? DefaultSkirmishTickLimit : ProvingGround.DefaultTicks);
+    public long Ticks => TicksOption ?? (Campaign || Mode is MatchMode.Skirmish or MatchMode.Purge ? DefaultSkirmishTickLimit : ProvingGround.DefaultTicks);
 
     public int Players { get; init; } = 2;
 
@@ -140,6 +152,20 @@ internal sealed record HeadlessOptions
     public int TimeoutSeconds { get; init; } = 600;
 
     public bool IsNetwork => Host || Join is not null || Rejoin is not null || Lan > 0;
+
+    /// <summary>Play campaign missions instead of a single match.</summary>
+    public bool Campaign { get; init; }
+
+    /// <summary>The campaign to start, when given as a code.</summary>
+    public CampaignCode? CampaignCode { get; init; }
+
+    public CampaignRules CampaignRules { get; init; } = CampaignRuleSets.Standard;
+
+    /// <summary>Where the campaign is continued from and saved to.</summary>
+    public string? CampaignSave { get; init; }
+
+    /// <summary>Missions to play; null plays until the campaign ends.</summary>
+    public int? Missions { get; init; }
 
     public MapArchetype? Archetype { get; init; }
 
@@ -216,7 +242,12 @@ internal sealed record HeadlessOptions
             {
                 "--seed" => TryUInt64(value, v => options = options with { Seed = v }),
                 "--ticks" => TryInt64(value, 0, v => options = options with { TicksOption = v }),
+                "--mode" when string.Equals(value, "campaign", StringComparison.OrdinalIgnoreCase) => Set(() => options = options with { Campaign = true }),
                 "--mode" => TryMode(value, v => options = options with { Mode = v }),
+                "--campaign-code" => Ashfall.Campaign.CampaignCode.TryParse(value, out var campaignCode) && Set(() => options = options with { CampaignCode = campaignCode, Campaign = true }),
+                "--campaign-rules" => CampaignRuleSets.Find(value) is { } rules && Set(() => options = options with { CampaignRules = rules, Campaign = true }),
+                "--campaign-save" => Set(() => options = options with { CampaignSave = value, Campaign = true }),
+                "--missions" => TryInt32(value, 1, v => options = options with { Missions = v, Campaign = true }),
                 "--players" => TryInt32(value, 1, v => options = options with { Players = v }),
                 "--teams" => TryTeams(value, v => options = options with { Teams = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),

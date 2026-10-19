@@ -13,7 +13,7 @@ internal sealed record ClientOptions
 
         Usage: ashfall [options]
 
-        With no options the main menu opens: a co-op Purge, a skirmish, host a game or join one by address.
+        With no options the main menu opens: the campaign, a co-op Purge, a skirmish, host a game or join one.
         Options that only make sense for a skirmish (--seed, --opponent, --frames, --screenshot, ...)
         start one directly; --menu shows the menu anyway.
 
@@ -49,6 +49,11 @@ internal sealed record ClientOptions
                                  With --purge: Spawning Pits on the map's fields (1-12, default 4)
           --creatures <n>        With --swarm: the most creatures alive at once (default 2000)
                                  With --purge: a cap on the waves' growth (default 1500)
+          --campaign             Open the campaign screen: continue the saved campaign, or start one
+          --campaign-code <code> Start this campaign (e.g. ASH-0G000-0041E), replacing the save
+          --campaign-save <file> Keep the campaign here (default: next to the menu settings)
+          --campaign-missions <n> With --autopilot: play n missions (the autopilot picks them), then show the map
+                                 (--allies sets the AI allies in every mission, default 1)
           -h, --help             Show this help
 
         Multiplayer (peer to peer; the host forwards one UDP port, default 47600):
@@ -132,6 +137,18 @@ internal sealed record ClientOptions
 
     public string Name { get; init; } = "PLAYER";
 
+    /// <summary>Open the campaign screen rather than the menu or a match.</summary>
+    public bool Campaign { get; init; }
+
+    /// <summary>A new campaign to start, replacing the save.</summary>
+    public string? CampaignCode { get; init; }
+
+    /// <summary>Where the campaign is saved; null for the default.</summary>
+    public string? CampaignSave { get; init; }
+
+    /// <summary>With --autopilot: missions to play before handing the campaign screen back.</summary>
+    public int CampaignMissions { get; init; }
+
     public bool IsNetwork => Host || Join is not null || Rejoin is not null;
 
     /// <summary>The generated map to play (from --archetype/--slider or --map-code), or null for the hand-made one.</summary>
@@ -154,7 +171,7 @@ internal sealed record ClientOptions
     private bool SkirmishImplied { get; init; }
 
     /// <summary>Whether the client opens on the main menu rather than going straight into a mode.</summary>
-    public bool StartsInMenu => Menu || (!IsNetwork && !Skirmish && !SkirmishImplied);
+    public bool StartsInMenu => Menu || (!IsNetwork && !Campaign && !Skirmish && !SkirmishImplied);
 
     public MatchSpec ToSpec()
     {
@@ -219,6 +236,9 @@ internal sealed record ClientOptions
                 case "--host":
                     options = options with { Host = true };
                     continue;
+                case "--campaign":
+                    options = options with { Campaign = true };
+                    continue;
             }
 
             if (i + 1 >= args.Count)
@@ -262,6 +282,15 @@ internal sealed record ClientOptions
                     break;
                 case "--look-at" when TryParsePoint(value, out var point):
                     options = options with { LookAt = point, SkirmishImplied = true };
+                    break;
+                case "--campaign-code" when Ashfall.Campaign.CampaignCode.TryParse(value, out _):
+                    options = options with { CampaignCode = value, Campaign = true };
+                    break;
+                case "--campaign-save" when value.Length > 0:
+                    options = options with { CampaignSave = value, Campaign = true };
+                    break;
+                case "--campaign-missions" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var missions) && missions >= 1:
+                    options = options with { CampaignMissions = missions, Campaign = true };
                     break;
                 case "--record" when value.Length > 0:
                     options = options with { Record = value };

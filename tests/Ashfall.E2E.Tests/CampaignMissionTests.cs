@@ -109,6 +109,61 @@ public class CampaignMissionTests
     }
 
     [Fact]
+    public async Task A_turn_played_headless_advances_the_campaign_and_survives_a_save()
+    {
+        var campaign = CampaignState.Start(3, CampaignRuleSets.Quick, MawDifficulty.Recruit);
+        var target = CampaignAutopilot.ChooseTarget(campaign);
+
+        // A short tick limit: the mission is cut off with nests standing, which counts as a loss.
+        var played = await CampaignRunner.PlayTurnAsync(campaign, target, players: 2, tickLimit: 600, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(1, campaign.Turn);
+        Assert.False(played.Result.Won);
+        Assert.Equal(600, played.Result.Ticks);
+        Assert.True(played.Result.NestsStanding > 0);
+        Assert.Equal(target, campaign.History[0].Target);
+        Assert.NotEmpty(played.Report.Lines);
+
+        var folder = Path.Combine(Path.GetTempPath(), "ashfall-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var path = Path.Combine(folder, "campaign.save");
+            CampaignFiles.Save(campaign, path);
+            Assert.False(File.Exists(path + ".tmp"));
+            Assert.True(CampaignFiles.TryLoad(path, out var loaded, out _));
+            Assert.Equal(campaign.ComputeHash(), loaded!.Campaign.ComputeHash());
+            Assert.StartsWith(campaign.Code.ToString() + ", QUICK, TURN 1, RECRUIT, METER ", CampaignFiles.Summary(loaded.Campaign), StringComparison.Ordinal);
+
+            File.WriteAllText(path, "not a save");
+            Assert.False(CampaignFiles.TryLoad(path, out _, out var error));
+            Assert.Contains("could not be read", error, StringComparison.Ordinal);
+            Assert.False(CampaignFiles.TryLoad(Path.Combine(folder, "missing.save"), out _, out _));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Nests_are_never_placed_where_the_players_cannot_walk()
+    {
+        // This map's corner is sealed off by a thin diagonal ridge; a nest used to land in it, out of every unit's reach.
+        Assert.True(Ashfall.MapGen.MapSettings.TryParseCode("CRS-283T99-Q2N23R-F8TG7PSQ1", out var map));
+        await using var match = await HeadlessMatch.StartAsync(MatchSpec.Purge(1, players: 2, nests: 3, map: map), GameSpeed.Unthrottled);
+        var simulation = match.Simulation;
+        var home = match.Map!.StartOrigins[0];
+        Assert.True(simulation.Navigator.TryFindNearestPassable(home, 8, out var from));
+        Assert.Equal(3, match.NestsAtStart);
+        foreach (var index in simulation.World.Store<Nest>().EntityIndices)
+        {
+            var origin = simulation.World.Store<StructureInfo>().Get(index).Origin;
+            var approachable = Enumerable.Range(-1, 5).SelectMany(dy => Enumerable.Range(-1, 5).Select(dx => new Ashfall.Simulation.Map.Cell(origin.X + dx, origin.Y + dy)))
+                .Any(cell => simulation.Map.IsPassable(cell) && simulation.Navigator.CanReach(from, cell));
+            Assert.True(approachable, $"The nest at {origin} cannot be reached.");
+        }
+    }
+
+    [Fact]
     public void Every_first_turn_mission_of_many_campaigns_builds_a_valid_match()
     {
         for (uint seed = 1; seed <= 12; seed++)

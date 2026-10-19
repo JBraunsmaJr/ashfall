@@ -38,6 +38,18 @@ public sealed record MenuSettings
     /// <summary>The generated map for skirmish and hosting, or null for the hand-made map.</summary>
     public MapSettings? Map { get; init; } = MapSettings.Default(MapArchetypes.Crossroads, 1);
 
+    /// <summary>Campaign: the rule-set a new campaign uses ("standard" or "quick").</summary>
+    public string CampaignRules { get; init; } = Ashfall.Campaign.CampaignRuleSets.Standard.Id;
+
+    /// <summary>Campaign: the difficulty a new campaign starts on.</summary>
+    public MawDifficulty CampaignDifficulty { get; init; } = MawDifficulty.Veteran;
+
+    /// <summary>Campaign: the world seed a new campaign is generated from.</summary>
+    public uint CampaignSeed { get; init; } = 1;
+
+    /// <summary>Campaign: scripted-AI allies alongside you in every mission (0-3).</summary>
+    public int CampaignAllies { get; init; } = 1;
+
     /// <summary>Most recent first, as typed (host or host:port).</summary>
     public IReadOnlyList<string> RecentHosts { get; init; } = [];
 
@@ -65,6 +77,10 @@ public sealed record MenuSettings
             "nests=" + PurgeNests.ToString(CultureInfo.InvariantCulture),
             "difficulty=" + PurgeDifficulty.ToString().ToLowerInvariant(),
             "map=" + (Map?.ToCode() ?? "hand-made"),
+            "campaign-rules=" + CampaignRules,
+            "campaign-difficulty=" + CampaignDifficulty.ToString().ToLowerInvariant(),
+            "campaign-seed=" + CampaignSeed.ToString(CultureInfo.InvariantCulture),
+            "campaign-allies=" + CampaignAllies.ToString(CultureInfo.InvariantCulture),
         };
         lines.AddRange(RecentHosts.Select(h => "recent=" + h));
         return string.Join('\n', lines) + "\n";
@@ -119,6 +135,18 @@ public sealed record MenuSettings
                     break;
                 case "map" when MapSettings.TryParseCode(value, out var map):
                     settings = settings with { Map = map };
+                    break;
+                case "campaign-rules" when Ashfall.Campaign.CampaignRuleSets.Find(value) is { } rules:
+                    settings = settings with { CampaignRules = rules.Id };
+                    break;
+                case "campaign-difficulty" when Enum.TryParse<MawDifficulty>(value, ignoreCase: true, out var campaignDifficulty) && Enum.IsDefined(campaignDifficulty):
+                    settings = settings with { CampaignDifficulty = campaignDifficulty };
+                    break;
+                case "campaign-seed" when uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var campaignSeed):
+                    settings = settings with { CampaignSeed = campaignSeed };
+                    break;
+                case "campaign-allies" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var campaignAllies) && campaignAllies < MatchSpec.PurgeMaxPlayers:
+                    settings = settings with { CampaignAllies = campaignAllies };
                     break;
                 case "recent" when HostAddress.TryParse(value, out _, out _) && recent.Count < MaxRecentHosts:
                     recent.Add(value);

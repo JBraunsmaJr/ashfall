@@ -1,28 +1,34 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using Ashfall.Campaign;
 using Ashfall.Core;
 using Ashfall.Rendering;
 using Ashfall.Rendering.Scene;
 using Ashfall.Session;
 using Ashfall.Session.Ai;
+using Ashfall.Session.Campaigns;
 using Ashfall.UI;
 using Brutal.GlfwApi;
 
 namespace Ashfall.Client;
 
 /// <summary>
-/// A single-player skirmish against the scripted (or idle) AI: the simulation runs on this thread
-/// between frames, and frames interpolate between the last two ticks.
+/// A single-player match (skirmish, Purge, swarm or a campaign mission): the simulation runs on this thread between
+/// frames, and frames interpolate between the last two ticks.
 /// </summary>
 internal static class SkirmishClient
 {
     // Unthrottled play would never yield to the window; cap the catch-up per frame instead.
     private const int MaxTicksPerFrame = 30;
 
-    public static async Task Run(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options)
+    /// <summary>
+    /// Plays <paramref name="spec"/> (by default the match the options describe) until it is left or the window closes.
+    /// Returns the campaign result read from its end state, or null if it was left before it ended.
+    /// </summary>
+    public static async Task<MissionResult?> Run(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options, MatchSpec? spec = null)
     {
-        await using var match = await HeadlessMatch.StartAsync(options.ToSpec(), options.Speed).ConfigureAwait(false);
+        await using var match = await HeadlessMatch.StartAsync(spec ?? options.ToSpec(), options.Speed).ConfigureAwait(false);
         if (options.Autopilot && match.LocalPlayer is { } local)
         {
             match.AddCommandSource(new ScriptedSkirmishAi(local.PlayerId, options.Seed));
@@ -137,6 +143,7 @@ internal static class SkirmishClient
             CultureInfo.InvariantCulture,
             $"Presented {renderer.FramesPresented} frames at {renderer.RenderSize} in {clock.Elapsed.TotalSeconds:F1}s ({renderer.LastQuadCount} quads in the last); " +
             $"swapchain built {renderer.SwapchainGenerations}x; simulation at tick {match.Tick} ({result}), state {StateHasher.Format(match.Simulation.ComputeStateHash())}."));
+        return match.IsOver ? CampaignMatches.ResultOf(match) : null;
     }
 
     /// <summary>How far between the previous tick and the next the frame is, for interpolation.</summary>

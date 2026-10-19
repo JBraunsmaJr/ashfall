@@ -675,7 +675,7 @@ public sealed class CampaignState
             case CampaignEventKind.SurvivorConvoy:
                 return _liberated[region];
             case CampaignEventKind.HiveEmergence:
-                return !_liberated[region] && !_hive[region] && _infestation[region] >= 4;
+                return !_liberated[region] && !_hive[region] && _infestation[region] >= 4 && World.Distance(World.Home, region) >= Rules.MinHiveDistance;
             default:
                 return false;
         }
@@ -708,7 +708,8 @@ public sealed class CampaignState
             sum += level;
         }
 
-        var ceiling = (long)_infestation.Length * MaxInfestation * Rules.MeterCeilingPercent(Difficulty);
+        // Home never falls, so the meter is measured against every other region at the deepest infestation.
+        var ceiling = (long)(_infestation.Length - 1) * MaxInfestation * Rules.MeterCeilingPercent(Difficulty);
         var meter = sum * 10_000 / ceiling;
         Meter = meter > 100 ? 100 : (int)meter;
     }
@@ -743,6 +744,24 @@ public sealed class CampaignState
         return value ^ (value >> 31);
     }
 
+    /// <summary>An enum name in words: "RiverValley" becomes "River Valley", "Survivors, TechSite" becomes "Survivors, Tech Site".</summary>
+    public static string Words(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var text = new System.Text.StringBuilder(name.Length + 8);
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(name[i]) && char.IsLower(name[i - 1]))
+            {
+                text.Append(' ');
+            }
+
+            text.Append(name[i]);
+        }
+
+        return text.ToString();
+    }
+
     public static string EventName(CampaignEventKind kind) => kind switch
     {
         CampaignEventKind.MeteorStrike => "Meteor strike",
@@ -765,7 +784,7 @@ public sealed class CampaignState
             _ => campaignEvent is null ? $"Purge {region.Name}" : $"{EventName(campaignEvent.Kind)}: purge {region.Name}",
         };
         var text = string.Create(CultureInfo.InvariantCulture,
-            $"{goal}. {nests} {nestName}, infestation {level}, {region.Terrain} terrain, {region.Biome} biome.");
+            $"{goal}. {nests} {nestName}, infestation {level}, {Words(region.Terrain.ToString()).ToLowerInvariant()}, {Words(region.Biome.ToString()).ToLowerInvariant()} biome.");
         if (liberatedNeighbours > 0)
         {
             text += string.Create(CultureInfo.InvariantCulture,

@@ -57,6 +57,11 @@ try
         return MultiplayerClient.Run(window, renderer, input, options).ExitCode;
     }
 
+    if (options.Campaign && !options.Menu)
+    {
+        return await CampaignClient.Start(window, renderer, input, options).ConfigureAwait(false);
+    }
+
     if (options.StartsInMenu)
     {
         return await MenuClient.Run(window, renderer, input, options).ConfigureAwait(false);

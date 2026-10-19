@@ -20,6 +20,9 @@ public sealed class Navigator
     private readonly GridPathfinder _pathfinder;
     private readonly List<Cell> _cellScratch = [];
     private readonly List<FixVec2> _pointScratch = [];
+    private readonly Stack<int> _fillScratch = new();
+    private int[] _region = [];
+    private long _regionVersion = -1;
 
     public Navigator(GridMap map)
     {
@@ -29,6 +32,91 @@ public sealed class Navigator
     }
 
     public PathStore Paths { get; } = new();
+
+    /// <summary>
+    /// True when a unit at <paramref name="from"/> could walk to where <see cref="PlanRoute"/> would send it for
+    /// <paramref name="to"/> (the nearest free cell when that point is blocked): no route that falls short.
+    /// </summary>
+    public bool CanReach(FixVec2 from, FixVec2 to)
+    {
+        var goal = Cell.Containing(_map.Bounds.Clamp(to));
+        if (!_map.IsPassable(goal) && !TryFindNearestPassable(goal, maxRadius: 12, out goal))
+        {
+            return false;
+        }
+
+        return CanReach(Cell.Containing(from), goal);
+    }
+
+    /// <summary>
+    /// True when a unit standing in <paramref name="from"/> could walk to <paramref name="to"/>: both cells lie in one
+    /// connected stretch of passable ground. A cell that is not passable (a unit pushed against a building, a target
+    /// on a footprint) gives no answer either way, so it counts as reachable. The regions are a cache over the map,
+    /// rebuilt only when a structure is placed or removed, so asking is cheap; a full A* search that cannot arrive is not.
+    /// </summary>
+    public bool CanReach(Cell from, Cell to)
+    {
+        if (!_map.InBounds(from) || !_map.InBounds(to))
+        {
+            return true;
+        }
+
+        if (_regionVersion != _map.StructureVersion || _region.Length != _map.Width * _map.Height)
+        {
+            LabelRegions();
+        }
+
+        var a = _region[_map.IndexOf(from)];
+        var b = _region[_map.IndexOf(to)];
+        return a < 0 || b < 0 || a == b;
+    }
+
+    // Flood-fills passable ground into numbered regions (4-connected: the pathfinder never cuts a blocked corner, so a
+    // diagonal step always has an orthogonal way round and adds no connections).
+    private void LabelRegions()
+    {
+        var count = _map.Width * _map.Height;
+        if (_region.Length != count)
+        {
+            _region = new int[count];
+        }
+
+        Array.Fill(_region, -1);
+        var next = 0;
+        for (var start = 0; start < count; start++)
+        {
+            if (_region[start] >= 0 || !_map.IsPassable(start))
+            {
+                continue;
+            }
+
+            _region[start] = next;
+            _fillScratch.Push(start);
+            while (_fillScratch.Count > 0)
+            {
+                var index = _fillScratch.Pop();
+                var x = index % _map.Width;
+                var y = index / _map.Width;
+                Fill(x > 0 ? index - 1 : -1, next);
+                Fill(x < _map.Width - 1 ? index + 1 : -1, next);
+                Fill(y > 0 ? index - _map.Width : -1, next);
+                Fill(y < _map.Height - 1 ? index + _map.Width : -1, next);
+            }
+
+            next++;
+        }
+
+        _regionVersion = _map.StructureVersion;
+    }
+
+    private void Fill(int index, int region)
+    {
+        if (index >= 0 && _region[index] < 0 && _map.IsPassable(index))
+        {
+            _region[index] = region;
+            _fillScratch.Push(index);
+        }
+    }
 
     /// <summary>
     /// Sends <paramref name="mover"/> from <paramref name="from"/> toward <paramref name="to"/>. If the

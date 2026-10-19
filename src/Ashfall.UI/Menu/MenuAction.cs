@@ -10,4 +10,7 @@ public enum MenuAction
 
     /// <summary>A co-op Purge against the Maw, with AI allies.</summary>
     Purge,
+
+    /// <summary>The co-op campaign: continue the saved one or start a new one (<see cref="MenuChoice.NewCampaign"/>).</summary>
+    Campaign,
 }

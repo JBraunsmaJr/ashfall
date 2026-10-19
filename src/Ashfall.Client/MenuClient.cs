@@ -6,6 +6,7 @@ using System.Numerics;
 using Ashfall.Rendering;
 using Ashfall.Rendering.Scene;
 using Ashfall.Session;
+using Ashfall.Session.Campaigns;
 using Ashfall.UI.Menu;
 using Brutal.GlfwApi;
 
@@ -48,6 +49,10 @@ internal static class MenuClient
                         Opponent = settings.IdleOpponent ? PlayerController.IdleAi : PlayerController.ScriptedAi,
                         GeneratedMap = settings.Map,
                     }).ConfigureAwait(false);
+                    break;
+
+                case MenuAction.Campaign:
+                    message = await CampaignClient.FromMenu(window, renderer, input, options, choice).ConfigureAwait(false);
                     break;
 
                 case MenuAction.Purge:
@@ -96,7 +101,8 @@ internal static class MenuClient
 
     private static MenuChoice? ShowMenu(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options, MenuSettings settings, string? message)
     {
-        var menu = new MainMenuScreen(settings, message);
+        var saved = CampaignFiles.TryLoad(CampaignFiles.DefaultPath, out var loaded, out _) ? CampaignFiles.Summary(loaded!.Campaign) : null;
+        var menu = new MainMenuScreen(settings, message) { SavedCampaign = saved };
         var scene = new FrameScene();
         var clock = Stopwatch.StartNew();
         input.State.EndFrame();
