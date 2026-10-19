@@ -96,6 +96,13 @@ jobs:
           --seeds 40 --sweep --min-first-try 90 --verbose
           --sheet mapgen-${{ runner.os }}.png
 
+      - name: Campaign gate (M8) - whole campaigns with auto-resolved missions, winnable, losable, never stuck
+        run: >
+          dotnet run --project tools/Ashfall.Tools.CampaignPreview -c Release --no-build --
+          --seeds 60 --min-win 90 --min-loss 80
+          --hash-out campaign-${{ runner.os }}.hash
+          --sheet campaign-${{ runner.os }}.png
+
       - name: LAN match (M3 gate) - four separate processes over UDP, no desyncs, replay verified
         shell: bash
         run: |
@@ -113,6 +120,7 @@ jobs:
             swarm-${{ runner.os }}.*
             nests-${{ runner.os }}.*
             purge-${{ runner.os }}.*
+            campaign-${{ runner.os }}.hash
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet
@@ -120,6 +128,12 @@ jobs:
         with:
           name: mapgen-${{ runner.os }}
           path: mapgen-${{ runner.os }}.png
+
+      - name: Upload campaign world map
+        uses: actions/upload-artifact@v4
+        with:
+          name: campaign-${{ runner.os }}
+          path: campaign-${{ runner.os }}.png
 
       - name: Upload LAN match logs and replay
         if: always()
@@ -216,8 +230,8 @@ jobs:
           path: render-*.png
 
   cross-platform-determinism:
-    # M0/M1/M4/M5 exit gates: the same matches (hand-made and generated maps, the swarm, the Purge) must produce the same
-    # hashes on Windows and Linux.
+    # M0/M1/M4/M5/M8 exit gates: the same matches (hand-made and generated maps, the swarm, the Purge) and campaigns must
+    # produce the same hashes on Windows and Linux.
     name: Cross-platform determinism
     needs: build-and-test
     runs-on: ubuntu-latest
@@ -244,6 +258,14 @@ jobs:
               status=1
             fi
           done
+          echo "## Campaigns (auto-resolved, Veteran, skill 75)" >> "$GITHUB_STEP_SUMMARY"
+          if diff campaign-Linux.hash campaign-Windows.hash > campaign.diff; then
+            echo "Every campaign ended in the same state on both." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Campaigns ended differently on Linux and Windows. First difference:"
+            head -n 4 campaign.diff
+            status=1
+          fi
           echo "## LAN match (4 processes) final state" >> "$GITHUB_STEP_SUMMARY"
           echo "Linux:   $(cat lan-Linux.hash)" >> "$GITHUB_STEP_SUMMARY"
           echo "Windows: $(cat lan-Windows.hash)" >> "$GITHUB_STEP_SUMMARY"

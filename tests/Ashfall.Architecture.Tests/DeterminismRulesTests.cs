@@ -17,7 +17,7 @@ public class DeterminismRulesTests
     private const BindingFlags EveryMember =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
-    public static TheoryData<string> DeterministicAssemblies => new() { "Ashfall.Core", "Ashfall.Content", "Ashfall.Simulation", "Ashfall.MapGen" };
+    public static TheoryData<string> DeterministicAssemblies => new() { "Ashfall.Core", "Ashfall.Content", "Ashfall.Simulation", "Ashfall.MapGen", "Ashfall.Campaign" };
 
     [Theory]
     [MemberData(nameof(DeterministicAssemblies))]
@@ -28,6 +28,7 @@ public class DeterminismRulesTests
             "Ashfall.Core" => typeof(Fix64).Assembly,
             "Ashfall.Content" => typeof(GameContent).Assembly,
             "Ashfall.MapGen" => typeof(Ashfall.MapGen.MapGenerator).Assembly,
+            "Ashfall.Campaign" => typeof(Ashfall.Campaign.CampaignState).Assembly,
             _ => typeof(GameSimulation).Assembly,
         };
 

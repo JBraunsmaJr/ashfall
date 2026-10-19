@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ashfall-campaignpreview</AssemblyName>
+    <Description>Generates campaign worlds, renders them, and plays whole campaigns with auto-resolved missions across seeds, skills and difficulties to show the rules are winnable, losable and never stuck. CI runs it as the campaign gate.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ashfall.Campaign\Ashfall.Campaign.csproj" />
+    <Compile Include="..\Ashfall.Tools.MapPreview\PngWriter.cs" Link="PngWriter.cs" />
+  </ItemGroup>
+
+</Project>

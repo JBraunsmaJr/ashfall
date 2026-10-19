@@ -46,13 +46,18 @@ public static class MatchSpecCodec
 
         // Format 5: the director's difficulty.
         writer.WriteByte((byte)spec.Difficulty);
+
+        // Format 6: campaign mission settings: starting nest tier and the players' starting bonuses.
+        writer.WriteByte((byte)spec.NestTier);
+        writer.WriteInt32(spec.BonusCredits);
+        writer.WriteByte((byte)spec.BonusHarvesters);
     }
 
     /// <param name="formatVersion">
     /// The replay format: 1 had no map code (always a hand-made map), 2 no creature count, 3 no nest count, 4 no
-    /// difficulty (Veteran).
+    /// difficulty (Veteran), 5 no campaign settings (tier 1 nests, no bonuses).
     /// </param>
-    public static MatchSpec Read(PacketReader reader, int formatVersion = 5)
+    public static MatchSpec Read(PacketReader reader, int formatVersion = 6)
     {
         ArgumentNullException.ThrowIfNull(reader);
         var seed = reader.ReadUInt64();
@@ -91,6 +96,9 @@ public static class MatchSpecCodec
         var creatures = formatVersion >= 3 ? reader.ReadInt32() : 0;
         var nests = formatVersion >= 4 ? reader.ReadInt32() : 0;
         var difficulty = formatVersion >= 5 ? (MawDifficulty)reader.ReadByte() : MawDifficulty.Veteran;
+        var nestTier = formatVersion >= 6 ? reader.ReadByte() : 1;
+        var bonusCredits = formatVersion >= 6 ? reader.ReadInt32() : 0;
+        var bonusHarvesters = formatVersion >= 6 ? reader.ReadByte() : 0;
         var spec = new MatchSpec
         {
             Seed = seed,
@@ -108,6 +116,9 @@ public static class MatchSpecCodec
             Creatures = creatures,
             Nests = nests,
             Difficulty = difficulty,
+            NestTier = nestTier,
+            BonusCredits = bonusCredits,
+            BonusHarvesters = bonusHarvesters,
         };
         try
         {

@@ -88,7 +88,8 @@ public sealed class GameSimulation
         for (var id = 0; id < players.Count; id++)
         {
             var faction = content.FactionIndex(players[id].FactionId);
-            _players[id] = new PlayerState(id, players[id].Team, faction, content.Economy.StartingCredits);
+            ArgumentOutOfRangeException.ThrowIfNegative(players[id].BonusCredits, nameof(players));
+            _players[id] = new PlayerState(id, players[id].Team, faction, content.Economy.StartingCredits + players[id].BonusCredits);
         }
 
         // Registration order is part of the state hash: append new component types at the end.

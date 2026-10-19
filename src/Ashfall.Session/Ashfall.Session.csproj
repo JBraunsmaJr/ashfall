@@ -10,6 +10,7 @@
     <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
     <ProjectReference Include="..\Ashfall.MapGen\Ashfall.MapGen.csproj" />
     <ProjectReference Include="..\Ashfall.Networking\Ashfall.Networking.csproj" />
+    <ProjectReference Include="..\Ashfall.Campaign\Ashfall.Campaign.csproj" />
   </ItemGroup>
 
 </Project>

@@ -34,14 +34,21 @@ public static class PurgeNests
     /// Places up to <paramref name="count"/> Spawning Pits and returns how many were placed (fewer when the map has
     /// too little room far from the bases). The choice depends only on the map and the starts, so every peer agrees.
     /// </summary>
-    public static int Place(GameSimulation simulation, IReadOnlyList<Cell> playerStarts, int count)
+    public static int Place(GameSimulation simulation, IReadOnlyList<Cell> playerStarts, int count) =>
+        Place(simulation, playerStarts, count, simulation?.Content.StructureIndex(MawContent.SpawningPit) ?? throw new ArgumentNullException(nameof(simulation)));
+
+    /// <summary>
+    /// Places up to <paramref name="count"/> nests of <paramref name="nestType"/> (a 3x3 nest structure: a campaign
+    /// mission may start at a higher tier) the same way, and returns how many were placed.
+    /// </summary>
+    public static int Place(GameSimulation simulation, IReadOnlyList<Cell> playerStarts, int count, int nestType)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         ArgumentNullException.ThrowIfNull(playerStarts);
         ArgumentOutOfRangeException.ThrowIfNegative(count);
 
         var map = simulation.Map;
-        var pit = simulation.Content.StructureIndex(MawContent.SpawningPit);
+        var pit = nestType;
         var footprint = simulation.Content.Structure(pit);
         var far = MinimumDistance * MinimumDistance;
 

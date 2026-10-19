@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The global co-op campaign (GDD section 7): seed-generated world of regions and theatres, turns, the Maw's spread, events, the global infestation meter, region-to-mission planning, campaign codes, saves and the campaign-state hash. Pure and deterministic: every peer derives the same campaign from the same save.</Description>
+    <AshfallDeterministic>true</AshfallDeterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ashfall.Core\Ashfall.Core.csproj" />
+    <ProjectReference Include="..\Ashfall.Simulation\Ashfall.Simulation.csproj" />
+    <ProjectReference Include="..\Ashfall.MapGen\Ashfall.MapGen.csproj" />
+  </ItemGroup>
+
+</Project>

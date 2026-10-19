@@ -8,7 +8,8 @@ namespace Ashfall.Architecture.Tests;
 
 /// <summary>
 /// Enforces the dependency direction from the GDD:
-/// Core ← Content ← Simulation ← (MapGen, Networking) ← Session ← UI ← Client, with Session ← Headless and Rendering ← UI.
+/// Core ← Content ← Simulation ← (MapGen, Networking) ← Campaign ← Session ← UI ← Client, with Session ← Headless and
+/// Rendering ← UI. The campaign produces map specs (so it uses MapGen) but never touches rendering or the network.
 /// The simulation must never see rendering,
 /// audio, UI, networking or BRUTAL, so the headless runner exercises exactly what players run.
 /// </summary>
@@ -56,9 +57,16 @@ public class LayeringTests
     }
 
     [Fact]
-    public void Session_depends_only_on_core_content_simulation_map_generation_and_networking()
+    public void The_campaign_depends_only_on_core_simulation_and_map_generation()
     {
-        string[] expected = ["Ashfall.Content", "Ashfall.Core", "Ashfall.MapGen", "Ashfall.Networking", "Ashfall.Simulation"];
+        string[] expected = ["Ashfall.Core", "Ashfall.MapGen", "Ashfall.Simulation"];
+        Assert.Equal(expected, NonRuntimeReferences(typeof(Ashfall.Campaign.CampaignState).Assembly));
+    }
+
+    [Fact]
+    public void Session_depends_only_on_core_content_simulation_map_generation_networking_and_the_campaign()
+    {
+        string[] expected = ["Ashfall.Campaign", "Ashfall.Content", "Ashfall.Core", "Ashfall.MapGen", "Ashfall.Networking", "Ashfall.Simulation"];
         Assert.Equal(expected, NonRuntimeReferences(Session));
     }
 

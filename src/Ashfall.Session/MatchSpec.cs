@@ -96,6 +96,21 @@ public sealed record MatchSpec
     /// <summary>Purge only: how hard the Maw's director pushes (GDD section 3).</summary>
     public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
 
+    /// <summary>
+    /// Purge only: the tier the nests start at (1 Spawning Pit, 2 Brood Nest, 3 Behemoth Den). Campaign missions start
+    /// deeper-infested regions at higher tiers (GDD section 7).
+    /// </summary>
+    public int NestTier { get; init; } = 1;
+
+    /// <summary>Purge only: credits every player starts with on top of the usual (campaign bonuses).</summary>
+    public int BonusCredits { get; init; }
+
+    /// <summary>Purge only: harvesters every player starts with beside the Construction Yard (campaign bonuses).</summary>
+    public int BonusHarvesters { get; init; }
+
+    /// <summary>Most extra starting harvesters per player.</summary>
+    public const int MaxBonusHarvesters = 4;
+
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
@@ -293,6 +308,12 @@ public sealed record MatchSpec
 
             ArgumentOutOfRangeException.ThrowIfLessThan(Nests, 1, nameof(Nests));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(Nests, PurgeMaxNests, nameof(Nests));
+            ArgumentOutOfRangeException.ThrowIfLessThan(NestTier, 1, nameof(NestTier));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(NestTier, 3, nameof(NestTier));
+            ArgumentOutOfRangeException.ThrowIfNegative(BonusCredits, nameof(BonusCredits));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(BonusCredits, 100_000, nameof(BonusCredits));
+            ArgumentOutOfRangeException.ThrowIfNegative(BonusHarvesters, nameof(BonusHarvesters));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(BonusHarvesters, MaxBonusHarvesters, nameof(BonusHarvesters));
             ArgumentOutOfRangeException.ThrowIfLessThan(Creatures, 1, nameof(Creatures));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(Creatures, SwarmMaxCreatures, nameof(Creatures));
         }

@@ -6,6 +6,8 @@ using Ashfall.Session.Commands;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Commands;
+using Ashfall.Simulation.Components;
+using Ashfall.Simulation.Ecs;
 using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Players;
 
@@ -28,6 +30,9 @@ public sealed class HeadlessMatch : IAsyncDisposable
     /// <summary>The skirmish or Purge map (hand-made or generated); null for the proving ground and the swarm test.</summary>
     public MatchMap? Map { get; }
 
+    /// <summary>Nests the Maw started with (Purge and swarm; 0 otherwise): with those left, how many the players destroyed.</summary>
+    public int NestsAtStart { get; }
+
     private HeadlessMatch(MatchSpec spec, GameSpeed speed, TimeProvider timeProvider)
     {
         Spec = spec;
@@ -40,6 +45,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
                 : CreateSkirmish(spec, _sources, out localPlayer, out map);
             LocalPlayer = localPlayer;
             Map = map;
+            NestsAtStart = Simulation.World.Store<Nest>().Count;
             var remote = Enumerable.Range(0, spec.Players).Where(seat => spec.Controllers[seat] == PlayerController.Remote).ToArray();
             if (remote.Length > 0)
             {
@@ -53,6 +59,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
         if (spec.Mode == MatchMode.Swarm)
         {
             Simulation = CreateSwarm(spec);
+            NestsAtStart = Simulation.World.Store<Nest>().Count;
             if (spec.Controllers[0] == PlayerController.Human)
             {
                 LocalPlayer = new LocalOrders(0);
@@ -234,7 +241,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
         var players = new PlayerSetup[spec.Players];
         for (var player = 0; player < players.Length; player++)
         {
-            players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId);
+            players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId, spec.BonusCredits);
         }
 
         var map = matchMap = MatchMap.Create(spec.GeneratedMap, spec.Players, coop: true);
@@ -252,9 +259,19 @@ public sealed class HeadlessMatch : IAsyncDisposable
             Difficulty = spec.Difficulty,
         };
         var simulation = new GameSimulation(spec.Seed, map.Grid, content, players, victoryEnabled: true, horde, cindriteRegrowth: true, MatchGoal.Purge);
-        PlaceBases(spec, simulation, map, sources, out localPlayer);
+        var yards = PlaceBases(spec, simulation, map, sources, out localPlayer);
+        var harvester = content.UnitIndex(BulwarkContent.Harvester);
+        foreach (var yard in yards)
+        {
+            for (var i = 0; i < spec.BonusHarvesters; i++)
+            {
+                simulation.SpawnUnitAt(yard, harvester);
+            }
+        }
+
         var starts = map.StartOrigins.Take(spec.Players).ToArray();
-        if (PurgeNests.Place(simulation, starts, spec.Nests) == 0)
+        var nest = content.StructureIndex(spec.NestTier switch { 3 => MawContent.BehemothDen, 2 => MawContent.BroodNest, _ => MawContent.SpawningPit });
+        if (PurgeNests.Place(simulation, starts, spec.Nests, nest) == 0)
         {
             throw new InvalidOperationException($"The map {map.Name} has no Cindrite field far enough from the bases for a nest.");
         }
@@ -262,14 +279,15 @@ public sealed class HeadlessMatch : IAsyncDisposable
         return simulation;
     }
 
-    // Every player's Construction Yard at its start, and the command source for whoever plays it.
-    private static void PlaceBases(MatchSpec spec, GameSimulation simulation, MatchMap map, List<ICommandSource> sources, out LocalOrders? localPlayer)
+    // Every player's Construction Yard at its start, and the command source for whoever plays it. Returns the yards.
+    private static Entity[] PlaceBases(MatchSpec spec, GameSimulation simulation, MatchMap map, List<ICommandSource> sources, out LocalOrders? localPlayer)
     {
         localPlayer = null;
         var yard = simulation.Content.StructureIndex(BulwarkContent.ConstructionYard);
+        var yards = new Entity[spec.Players];
         for (var player = 0; player < spec.Players; player++)
         {
-            simulation.PlaceStructure(player, yard, map.StartOrigins[player]);
+            yards[player] = simulation.PlaceStructure(player, yard, map.StartOrigins[player]);
             switch (spec.Controllers[player])
             {
                 case PlayerController.ScriptedAi:
@@ -285,6 +303,8 @@ public sealed class HeadlessMatch : IAsyncDisposable
                     break;
             }
         }
+
+        return yards;
     }
 
     // One Bulwark fortress (player 0, idle) against the Maw: an edge spawner that keeps spec.Creatures alive, or
