@@ -33,6 +33,7 @@ public sealed class GameSimulation
     private readonly ISystem[] _systems;
     private readonly PlayerState[] _players;
     private Command[] _commandScratch = new Command[64];
+    private readonly Dictionary<int, FlowField> _goalFields = [];
 
     /// <summary>An open map with no players or content rules in play: units only move (the M0 proving ground).</summary>
     public GameSimulation(ulong seed, MapBounds bounds)
@@ -79,7 +80,7 @@ public sealed class GameSimulation
                 throw new ArgumentOutOfRangeException(nameof(horde), horde.CreatureType, "The horde's creature type is not in the content.");
             }
 
-            Maw = new MawState(seed, horde);
+            Maw = new MawState(seed, horde, players.Count);
         }
         Visibility = new VisibilityMap(map.Width, map.Height, players.Count);
 
@@ -113,6 +114,7 @@ public sealed class GameSimulation
             new CindriteRegrowthSystem(),
             new HarvestSystem(),
             new HordeSpawnSystem(),
+            new DirectorSystem(),
             new NestSystem(),
             new TargetingSystem(),
             new MovementSystem(),
@@ -244,6 +246,32 @@ public sealed class GameSimulation
         var nest = PlaceStructure(MawPlayerId, structureType, origin);
         World.Add(nest, new Nest(rules.StartingBiomass, rules.SpawnIntervalTicks));
         return nest;
+    }
+
+    /// <summary>
+    /// The flow field toward a director's goal (see <see cref="SwarmGoal"/>): one player's base, or one player's
+    /// refineries, rebuilt when the structure layout has changed. <see cref="SwarmGoal.Nearest"/> is the shared
+    /// <see cref="SwarmField"/>. Derived data, like the shared field: never hashed.
+    /// </summary>
+    public FlowField FieldFor(int goal)
+    {
+        if (goal == SwarmGoal.Nearest)
+        {
+            return RefreshSwarmField();
+        }
+
+        if (!_goalFields.TryGetValue(goal, out var field))
+        {
+            field = new FlowField(Map);
+            _goalFields[goal] = field;
+        }
+
+        if (field.BuiltForVersion != Map.StructureVersion)
+        {
+            field.Rebuild(this, SwarmGoal.PlayerOf(goal), SwarmGoal.IsRaid(goal));
+        }
+
+        return field;
     }
 
     /// <summary>Rebuilds <see cref="SwarmField"/> if the structure layout changed since it was built, and returns it.</summary>

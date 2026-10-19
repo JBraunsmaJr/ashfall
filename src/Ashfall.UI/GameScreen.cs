@@ -8,6 +8,7 @@ using Ashfall.Session.Commands;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
+using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Ecs;
 using Ashfall.Simulation.Map;
 using Ashfall.UI.Drawing;
@@ -68,7 +69,7 @@ public sealed class GameScreen
     private Entity _lastSite = Entity.None;
     private int _ownUnitsLastTick = -1;
     private int _wavesAnnounced;
-    private bool _waveWarned;
+    private WaveOrder? _waveCalled;
     private int _nestsLastTick = -1;
     private readonly Dictionary<Entity, int> _structureHealth = [];
     private double _leaveArmedUntil = double.MinValue;
@@ -222,6 +223,13 @@ public sealed class GameScreen
         _batch.Visibility = _fog.Enabled ? _fog.Sample : null;
         _batch.Ground = (x, y) => WorldPainter.GroundHeight(Simulation.Map, x, y);
         _painter.PaintTerrain(Simulation, Camera, time);
+        if (Simulation.Maw?.Director is { Pending: { } wave } director && wave.Source.X >= 0)
+        {
+            var lead = wave.Kind == WaveKind.Assault ? director.Profile.TelegraphTicks : director.Profile.TelegraphTicks / 2;
+            var urgency = 1f - Math.Clamp((wave.LaunchTick - Simulation.Tick) / (float)Math.Max(1, lead), 0f, 1f);
+            _painter.PaintTelegraph(Simulation, wave.Source, urgency, time, wave.Kind == WaveKind.Probe ? Palette.Credits : Palette.MawGlow);
+        }
+
         _painter.PaintStructures(Simulation, Player, _selectedSet, scene);
         _painter.PaintUnits(Simulation, Player, _selectedSet, Math.Clamp(alpha, 0f, 1f));
         _painter.PaintCreatures(Simulation, Math.Clamp(alpha, 0f, 1f));
@@ -949,21 +957,29 @@ public sealed class GameScreen
         }
     }
 
-    // In a match with waves: nests left and the time to the next wave (or the warning that it is coming).
+    // In a match with a director: nests left and how big the brood has grown, or, while a wave is telegraphed, what
+    // it is, the countdown and where it will come from.
     private (string Text, LinearColor Color)? MawLine()
     {
-        if (Simulation.Maw is not { HasWaves: true } maw || Simulation.IsOver)
+        if (Simulation.Maw is not { Director: { } director } maw || Simulation.IsOver)
         {
             return null;
         }
 
         var nests = Simulation.World.Store<Nest>().Count;
-        var until = TimeSpan.FromSeconds(Math.Max(0, maw.NextWaveTick - Simulation.Tick) / (double)SimulationConstants.TicksPerSecond);
-        var imminent = maw.IsWaveImminent(Simulation.Tick);
-        var text = string.Create(
-            CultureInfo.InvariantCulture,
-            $"NESTS {nests}  {(imminent ? "THE MAW STIRS" : "NEXT WAVE")} {(int)until.TotalMinutes:00}:{until.Seconds:00}");
-        return (text, imminent && ((int)(_now * 3) % 2 == 0) ? Palette.TextWarn : Palette.Credits);
+        if (director.Pending is { } order)
+        {
+            var text = "NESTS " + nests.ToString(CultureInfo.InvariantCulture) + "  " + MawTelegraph.Countdown(Simulation, order, Player);
+            return (text, (int)(_now * 3) % 2 == 0 ? Palette.TextWarn : Palette.Credits);
+        }
+
+        var brood = 0;
+        foreach (var creature in Simulation.World.Store<Creature>().Components)
+        {
+            brood += creature.Brooding ? 1 : 0;
+        }
+
+        return (string.Create(CultureInfo.InvariantCulture, $"NESTS {nests}  BROOD {brood}/{maw.PopulationLimit}"), Palette.Credits);
     }
 
     private void DrawMessages(Canvas canvas)
@@ -1114,22 +1130,23 @@ public sealed class GameScreen
         }
 
         _nestsLastTick = nests;
-        if (!maw.HasWaves)
+
+        // A wave called: say what and from where. A wave launched: say it is coming.
+        if (maw.Director is not { } director)
         {
             return;
         }
 
-        var imminent = maw.IsWaveImminent(Simulation.Tick);
-        if (imminent && !_waveWarned)
+        if (director.Pending is { } order && order != _waveCalled)
         {
-            Say("THE MAW STIRS", Palette.TextWarn);
+            Say(MawTelegraph.Called(Simulation, order, Player), order.Kind == WaveKind.Probe ? Palette.Credits : Palette.TextWarn);
+            _waveCalled = order;
         }
 
-        _waveWarned = imminent;
-        if (maw.Waves > _wavesAnnounced)
+        if (director.Waves > _wavesAnnounced)
         {
-            Say(string.Create(CultureInfo.InvariantCulture, $"WAVE {maw.Waves} INCOMING"), Palette.TextWarn);
-            _wavesAnnounced = maw.Waves;
+            Say(MawTelegraph.Launched(_waveCalled?.Kind ?? WaveKind.Assault), Palette.TextWarn);
+            _wavesAnnounced = director.Waves;
         }
     }
 

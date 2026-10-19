@@ -3,7 +3,8 @@
 /// <summary>
 /// How the Maw spawns in a match: from nests placed with <see cref="GameSimulation.PlaceNest"/>, which feed on
 /// Cindrite, and (unless <see cref="EdgeSpawns"/> is off) from the map edges, topping the population up for the
-/// swarm stress test. The director's waves (GDD section 3) come later.
+/// swarm stress test. With <see cref="WaveIntervalTicks"/> set, the director (GDD section 3) holds what the nests
+/// breed back and sends it in telegraphed waves.
 /// </summary>
 public sealed record HordeSettings
 {
@@ -32,23 +33,23 @@ public sealed record HordeSettings
     public int MinimumDistance { get; init; } = 12;
 
     /// <summary>
-    /// Ticks between the Maw's waves, or 0 for none. With waves, what the nests breed broods around them, guarding
-    /// them, until the next wave is launched: the first <see cref="WaveIntervalTicks"/> after
-    /// <see cref="FirstSpawnTick"/>, then one every interval. Without, every creature marches as soon as it spawns.
+    /// 0 for no director: every creature a nest breeds marches at once. Otherwise what the nests breed broods around
+    /// them, guarding them, until the director sends it, and this is the longest the director waits between assaults
+    /// (it calls one sooner once the brood is three-quarters grown).
     /// </summary>
     public int WaveIntervalTicks { get; init; }
 
     /// <summary>
-    /// With waves: the most creatures alive while the first wave broods. Each wave launched raises the limit by
-    /// <see cref="WaveGrowth"/>, never past <see cref="Population"/>, so the waves escalate.
+    /// With a director: the brood the first assault may grow to, before <see cref="DirectorProfile.BudgetPercent"/>.
+    /// Each assault raises it by <see cref="WaveGrowth"/>, never past <see cref="Population"/>, so assaults escalate.
     /// </summary>
     public int FirstWaveSize { get; init; } = 40;
 
-    /// <summary>With waves: how much each launched wave raises the population limit.</summary>
+    /// <summary>With a director: how much each assault raises the brood the next may grow to.</summary>
     public int WaveGrowth { get; init; } = 30;
 
-    /// <summary>Ticks of warning before a wave: the window in which clients telegraph it.</summary>
-    public int WaveWarningTicks { get; init; } = 225;
+    /// <summary>With a director: how hard it pushes.</summary>
+    public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
 
     public void Validate()
     {
@@ -59,7 +60,10 @@ public sealed record HordeSettings
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(EdgeDepth, nameof(EdgeDepth));
         ArgumentOutOfRangeException.ThrowIfNegative(MinimumDistance, nameof(MinimumDistance));
         ArgumentOutOfRangeException.ThrowIfNegative(WaveIntervalTicks, nameof(WaveIntervalTicks));
-        ArgumentOutOfRangeException.ThrowIfNegative(WaveWarningTicks, nameof(WaveWarningTicks));
+        if (!Enum.IsDefined(Difficulty))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Difficulty), Difficulty, "Unknown difficulty.");
+        }
         ArgumentOutOfRangeException.ThrowIfNegative(FirstWaveSize, nameof(FirstWaveSize));
         ArgumentOutOfRangeException.ThrowIfNegative(WaveGrowth, nameof(WaveGrowth));
     }

@@ -2,6 +2,7 @@
 using Ashfall.MapGen;
 using Ashfall.Networking.Wire;
 using Ashfall.Simulation;
+using Ashfall.Simulation.Horde;
 
 namespace Ashfall.Session.Replays;
 
@@ -42,10 +43,16 @@ public static class MatchSpecCodec
 
         // Format 4: the swarm's nest count.
         writer.WriteInt32(spec.Nests);
+
+        // Format 5: the director's difficulty.
+        writer.WriteByte((byte)spec.Difficulty);
     }
 
-    /// <param name="formatVersion">The replay format: 1 had no map code (always a hand-made map), 2 no creature count, 3 no nest count.</param>
-    public static MatchSpec Read(PacketReader reader, int formatVersion = 4)
+    /// <param name="formatVersion">
+    /// The replay format: 1 had no map code (always a hand-made map), 2 no creature count, 3 no nest count, 4 no
+    /// difficulty (Veteran).
+    /// </param>
+    public static MatchSpec Read(PacketReader reader, int formatVersion = 5)
     {
         ArgumentNullException.ThrowIfNull(reader);
         var seed = reader.ReadUInt64();
@@ -83,6 +90,7 @@ public static class MatchSpecCodec
 
         var creatures = formatVersion >= 3 ? reader.ReadInt32() : 0;
         var nests = formatVersion >= 4 ? reader.ReadInt32() : 0;
+        var difficulty = formatVersion >= 5 ? (MawDifficulty)reader.ReadByte() : MawDifficulty.Veteran;
         var spec = new MatchSpec
         {
             Seed = seed,
@@ -99,6 +107,7 @@ public static class MatchSpecCodec
             GeneratedMap = generated,
             Creatures = creatures,
             Nests = nests,
+            Difficulty = difficulty,
         };
         try
         {

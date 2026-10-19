@@ -15,6 +15,12 @@ namespace Ashfall.Simulation.Components;
 /// </param>
 public record struct Creature(int CreatureType, int Cooldown, Entity Target, Entity Home, bool Brooding) : IStateHashable
 {
+    /// <summary>
+    /// Where it marches once sent (see <see cref="Horde.SwarmGoal"/>): the nearest player structure unless the
+    /// director aimed its wave at one player's base or refineries.
+    /// </summary>
+    public int Goal { get; set; }
+
     public readonly void AddTo(ref StateHasher hasher)
     {
         hasher.Add(CreatureType);
@@ -27,6 +33,12 @@ public record struct Creature(int CreatureType, int Cooldown, Entity Target, Ent
             hasher.Add(Home.Index);
             hasher.Add(Home.Generation);
             hasher.Add(Brooding);
+        }
+
+        if (Goal != Horde.SwarmGoal.Nearest)
+        {
+            // Only the director's waves have goals: matches without one hash as they always have.
+            hasher.Add(Goal);
         }
     }
 }

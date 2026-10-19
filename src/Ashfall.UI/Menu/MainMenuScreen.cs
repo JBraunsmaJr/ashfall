@@ -7,6 +7,8 @@ using Ashfall.UI.Drawing;
 using Ashfall.UI.Input;
 using Ashfall.UI.Text;
 
+using Ashfall.Simulation.Horde;
+
 namespace Ashfall.UI.Menu;
 
 /// <summary>
@@ -39,6 +41,7 @@ public sealed class MainMenuScreen
     private int _ais;
     private int _allies;
     private int _nests;
+    private MawDifficulty _difficulty;
     private MapSlider? _dragging;
     private Vector2 _framebuffer = new(1280, 720);
     private Vector2 _mouse;
@@ -58,6 +61,7 @@ public sealed class MainMenuScreen
         _ais = settings.Ais;
         _allies = settings.PurgeAllies;
         _nests = settings.PurgeNests;
+        _difficulty = settings.PurgeDifficulty;
         SetMap(settings.Map);
         Message = message;
     }
@@ -99,6 +103,7 @@ public sealed class MainMenuScreen
         Port = ParsePort(_port.Text) ?? HostAddress.DefaultPort,
         PurgeAllies = _allies,
         PurgeNests = _nests,
+        PurgeDifficulty = _difficulty,
         Map = Map,
         RecentHosts = _recentHosts,
     };
@@ -488,13 +493,14 @@ public sealed class MainMenuScreen
                 var players = 1 + _allies;
                 Stepper("AI ALLIES", _allies, () => _allies--, _allies > 0, () => _allies++, players < Ashfall.Session.MatchSpec.PurgeMaxPlayers);
                 Stepper("NESTS", _nests, () => _nests--, _nests > 1, () => _nests++, _nests < Ashfall.Session.MatchSpec.PurgeMaxNests);
+                Choices("THE MAW", [(_difficulty.ToString().ToUpperInvariant(), true, () => _difficulty = (MawDifficulty)(((int)_difficulty + 1) % 4))]);
                 _labels.Add((x0, y + (8 * scale), _seed.Label, 2 * scale, Palette.TextDim, false));
                 _widgets.Add(new Widget(x0 + (130 * scale), y, columnWidth - (250 * scale), rowHeight, string.Empty, null, true) { Field = _seed });
                 _widgets.Add(new Widget(x0 + columnWidth - (110 * scale), y, 110 * scale, rowHeight, "RANDOM", RandomSeed, true));
                 y += rowHeight + (10 * scale);
                 var seedOk = ulong.TryParse(_seed.Text, NumberStyles.None, CultureInfo.InvariantCulture, out _);
                 Note(seedOk
-                    ? "CO-OP AGAINST THE MAW: DESTROY EVERY NEST. NESTS FEED ON THE CINDRITE FIELDS AND BREED; THE FIRST WAVE COMES AT FIVE MINUTES, THEN EVERY TWO, EACH BIGGER. AI ALLIES SHARE YOUR TEAM."
+                    ? "CO-OP AGAINST THE MAW: DESTROY EVERY NEST. NESTS FEED ON THE CINDRITE FIELDS AND BREED; FROM THREE MINUTES THE MAW PROBES, RAIDS AND ASSAULTS, ALWAYS WITH WARNING. CLICK THE MAW TO CHANGE ITS DIFFICULTY. AI ALLIES SHARE YOUR TEAM."
                     : "ENTER A NUMBER FOR THE SEED.", seedOk ? Palette.TextDim : Palette.TextWarn);
                 PreviewBlock(Ashfall.Session.MatchSpec.PurgeMapStarts(players), bottom);
                 var leftBottom = y;

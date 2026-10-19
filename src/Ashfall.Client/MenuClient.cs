@@ -58,6 +58,7 @@ internal static class MenuClient
                         Seed = settings.Seed,
                         Allies = settings.PurgeAllies,
                         Nests = settings.PurgeNests,
+                        Difficulty = settings.PurgeDifficulty,
                         GeneratedMap = settings.Map,
                     }).ConfigureAwait(false);
                     break;

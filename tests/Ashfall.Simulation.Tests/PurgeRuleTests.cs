@@ -5,6 +5,7 @@ using Ashfall.Simulation.Ecs;
 using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Map;
 using Ashfall.Simulation.Players;
+using Ashfall.Simulation.Systems;
 using static Ashfall.Simulation.Tests.TestMatch;
 
 namespace Ashfall.Simulation.Tests;
@@ -17,52 +18,168 @@ public class PurgeRuleTests
     private static int Pit => TestMatch.Content.StructureIndex(MawContent.SpawningPit);
 
     [Fact]
-    public void Nests_brood_until_the_wave_then_the_brood_marches_and_the_next_wave_is_bigger()
+    public void The_director_telegraphs_an_assault_once_the_brood_has_grown_then_everything_brooding_marches()
     {
         var sim = WaveMatch(out _, out var nest);
         var mouth = sim.ExitCell(sim.World.Get<StructureInfo>(nest));
-
-        Run(sim, WaveInterval - 10);
         var maw = sim.Maw!;
-        Assert.Equal(0, maw.Waves);
-        Assert.Equal(20, maw.PopulationLimit);
-        Assert.Equal(20, sim.World.Store<Creature>().Count); // bred up to the first wave's size, and no further
+        var director = maw.Director!;
+        Assert.Equal(20, maw.PopulationLimit); // the first wave's size, at Veteran's full budget
+
+        // Nothing is called in the first half interval; then an assault, as soon as the brood is three-quarters grown.
+        RunUntil(sim, s => s.Maw!.Director!.Pending is not null, 2 * WaveInterval);
+        var called = sim.Tick - 1;
+        var order = director.Pending!.Value;
+        Assert.True(called >= WaveInterval / 2);
+        Assert.Equal(WaveKind.Assault, order.Kind);
+        Assert.Equal((0, -1), (order.Target, order.SecondTarget)); // one player: no split
+        Assert.Equal(mouth, order.Source);
+        Assert.Equal(called + director.Profile.TelegraphTicks, order.LaunchTick);
+        Assert.InRange(order.Size, 15, 20);
+
+        // The brood waits out the warning around its nest...
+        Run(sim, director.Profile.TelegraphTicks - 5);
+        Assert.Equal(0, director.Waves);
+        Assert.All(sim.World.Store<Creature>().Components.ToArray(), creature => Assert.True(creature.Brooding));
         foreach (var index in sim.World.Store<Creature>().EntityIndices)
         {
-            Assert.True(sim.World.Store<Creature>().Get(index).Brooding);
             var cell = Cell.Containing(sim.World.Store<Position>().Get(index).Value);
             Assert.InRange(Math.Max(Math.Abs(cell.X - mouth.X), Math.Abs(cell.Y - mouth.Y)), 0, 5);
         }
 
-        Assert.True(maw.IsWaveImminent(sim.Tick));
+        // ...then all of it goes, at the player's base, and the next assault may grow bigger after the breathing room.
         var bredBefore = maw.Spawned;
-        RunUntil(sim, s => s.Maw!.Waves == 1, 20);
-        Assert.Equal(WaveInterval + 1, sim.Tick); // launched while tick 300 ran
-        Assert.Equal(2 * WaveInterval, maw.NextWaveTick);
+        RunUntil(sim, s => s.Maw!.Director!.Waves == 1, 10);
+        Assert.Equal(order.LaunchTick + 1, sim.Tick);
+        Assert.Null(director.Pending);
+        Assert.Equal(1, director.Assaults);
+        Assert.Equal(order.LaunchTick, director.LastAssaultTick);
+        Assert.Equal(order.LaunchTick + director.Profile.CooldownTicks, director.CooldownUntil);
         Assert.Equal(30, maw.PopulationLimit);
-
-        // Everything bred before the launch marches; only what was bred since broods.
+        Assert.Equal(order.LaunchTick, director.LastTargeted(0));
         Assert.Equal(maw.Spawned - bredBefore, sim.World.Store<Creature>().Components.ToArray().Count(creature => creature.Brooding));
+        Assert.All(
+            sim.World.Store<Creature>().Components.ToArray().Where(creature => !creature.Brooding),
+            creature => Assert.Equal(SwarmGoal.Base(0), creature.Goal));
 
-        // The wave closes on the base (bottom left); the nest starts a new brood behind it.
+        // The wave closes on the base (bottom left).
         Run(sim, 150);
-        var marching = 0;
-        var brooding = 0;
         foreach (var index in sim.World.Store<Creature>().EntityIndices)
         {
-            var creature = sim.World.Store<Creature>().Get(index);
-            if (creature.Brooding)
+            if (!sim.World.Store<Creature>().Get(index).Brooding)
             {
-                brooding++;
-                continue;
+                Assert.True(sim.World.Store<Position>().Get(index).Value.X < Fix64.FromInt(mouth.X - 6), "The wave should have left the nest.");
             }
+        }
+    }
 
-            marching++;
-            Assert.True(sim.World.Store<Position>().Get(index).Value.X < Fix64.FromInt(mouth.X - 6), "The wave should have left the nest.");
+    [Fact]
+    public void Between_assaults_the_director_probes_and_raids_and_every_wave_is_telegraphed()
+    {
+        // Two players: one with a refinery (a raid target), one without. A long match, watching every wave called.
+        var sim = WaveMatch(out _, out _, players: 2);
+        sim.PlaceStructure(1, Structure(BulwarkContent.Refinery), new Cell(30, 40));
+        var director = sim.Maw!.Director!;
+        var orders = new List<(long Called, WaveOrder Order)>();
+        for (var tick = 0; tick < 6_000; tick++)
+        {
+            // The bases hold (their buildings are mended every tick), so the director keeps working for the whole run.
+            Mended(sim);
+            var before = director.Pending;
+            sim.Step([]);
+            if (director.Pending is { } order && order != before)
+            {
+                orders.Add((sim.Tick - 1, order));
+            }
         }
 
-        Assert.True(marching > 0);
-        Assert.InRange(brooding, 1, 10);
+        var seen = string.Join("; ", orders.Select(entry => $"{entry.Called}: {entry.Order.Kind} at {entry.Order.Target} x{entry.Order.Size}"));
+        foreach (var kind in Enum.GetValues<WaveKind>())
+        {
+            Assert.True(orders.Any(entry => entry.Order.Kind == kind), $"No {kind}: {seen}");
+        }
+
+        foreach (var (called, order) in orders)
+        {
+            var lead = order.Kind == WaveKind.Assault ? director.Profile.TelegraphTicks : director.Profile.TelegraphTicks / 2;
+            Assert.Equal(called + lead, order.LaunchTick);
+            if (order.Kind == WaveKind.Raid)
+            {
+                Assert.Equal(1, order.Target); // only player 1 has a refinery
+            }
+        }
+
+        // Waves take turns: a player is not hit twice running while the other is left alone.
+        Assert.Contains(orders, entry => entry.Order.Target == 0);
+        Assert.Contains(orders, entry => entry.Order.Target == 1);
+        for (var i = 1; i < orders.Count; i++)
+        {
+            var previous = orders[i - 1].Order;
+            var other = 1 - orders[i].Order.Target;
+            var otherWasHit = previous.Target == other || previous.SecondTarget == other;
+            Assert.False(previous.Target == orders[i].Order.Target && !otherWasHit && orders[i].Order.Kind != WaveKind.Raid, seen);
+        }
+    }
+
+    [Fact]
+    public void A_big_assault_splits_between_two_players_on_veteran_and_not_on_recruit()
+    {
+        foreach (var (difficulty, split) in new[] { (MawDifficulty.Veteran, true), (MawDifficulty.Recruit, false) })
+        {
+            var sim = WaveMatch(out _, out _, players: 2, firstWave: 70, difficulty: difficulty, interval: 3_000);
+            RunUntil(sim, s => Mended(s).Maw!.Director!.Pending is { Kind: WaveKind.Assault }, 3_000);
+            var order = sim.Maw!.Director!.Pending!.Value;
+            Assert.Equal(split, order.SecondTarget >= 0);
+            Assert.True(!split || order.Size >= DirectorSystem.SplitMinimum);
+
+            // The brood just before the launch, and where each of it goes.
+            RunUntil(sim, s => Mended(s).Tick == order.LaunchTick, sim.Maw.Director.Profile.TelegraphTicks + 2);
+            var brood = sim.World.Store<Creature>().EntityIndices.ToArray().Where(index => sim.World.Store<Creature>().Get(index).Brooding).ToArray();
+            Mended(sim).Step([]);
+            Assert.Equal(1, sim.Maw.Director.Assaults);
+            var goals = brood.GroupBy(index => sim.World.Store<Creature>().Get(index).Goal).ToDictionary(group => group.Key, group => group.Count());
+            if (split)
+            {
+                Assert.Equal(2, goals.Count);
+                Assert.InRange(goals[SwarmGoal.Base(order.Target)] - goals[SwarmGoal.Base(order.SecondTarget)], 0, 1); // halves
+            }
+            else
+            {
+                Assert.Equal([SwarmGoal.Base(order.Target)], goals.Keys);
+            }
+        }
+    }
+
+    [Fact]
+    public void Harder_difficulties_grow_bigger_broods_and_warn_less()
+    {
+        var profiles = Enum.GetValues<MawDifficulty>().Select(DirectorProfile.For).ToArray();
+        for (var i = 1; i < profiles.Length; i++)
+        {
+            Assert.True(profiles[i].BudgetPercent > profiles[i - 1].BudgetPercent);
+            Assert.True(profiles[i].TelegraphTicks < profiles[i - 1].TelegraphTicks);
+            Assert.True(profiles[i].CooldownTicks < profiles[i - 1].CooldownTicks);
+        }
+
+        Assert.Equal(30 * 15, profiles[0].TelegraphTicks); // the GDD's 30 seconds on Recruit...
+        Assert.Equal(15 * 15, profiles[^1].TelegraphTicks); // ...and 15 on Extinction
+        Assert.False(profiles[0].Raids);
+    }
+
+    [Fact]
+    public void A_wave_for_a_player_with_nothing_left_of_its_goal_goes_for_the_nearest_structure()
+    {
+        var sim = WaveMatch(out var plant, out _, players: 2);
+        var other = sim.World.EntityAt(sim.Map.StructureAt(new Cell(40, 42)));
+        RunUntil(sim, s => s.Maw!.Director!.Waves == 1, 2 * WaveInterval + 400);
+        var target = sim.World.Store<Creature>().Components.ToArray().First(creature => !creature.Brooding).Goal;
+        var victim = SwarmGoal.PlayerOf(target) == 0 ? plant : other;
+
+        sim.World.Get<Health>(victim).Current = 0;
+        Run(sim, 3);
+        Assert.All(
+            sim.World.Store<Creature>().Components.ToArray().Where(creature => !creature.Brooding),
+            creature => Assert.Equal(SwarmGoal.Nearest, creature.Goal));
     }
 
     [Fact]
@@ -76,7 +193,7 @@ public class PurgeRuleTests
         var rifleman = sim.SpawnUnit(0, Unit(BulwarkContent.Rifleman), center + new FixVec2(Fix64.Zero, Fix64.FromInt(-7)));
         var health = sim.World.Get<Health>(rifleman).Max;
         RunUntil(sim, s => !s.World.IsAlive(rifleman) || s.World.Get<Health>(rifleman).Current < health, 200);
-        Assert.Equal(0, sim.Maw!.Waves);
+        Assert.Equal(0, sim.Maw!.Director!.Waves);
     }
 
     [Fact]
@@ -135,22 +252,47 @@ public class PurgeRuleTests
         RunUntil(sim, s => s.World.Get<Armament>(rifleman).Target == enemy, 30);
     }
 
-    // One player with a Power Plant in the bottom-left corner; a fed Spawning Pit top right; waves every 300 ticks
-    // from tick 0, starting at 20 creatures and growing by 10.
-    private static GameSimulation WaveMatch(out Entity plant, out Entity nest, bool victory = false)
+    // Every building back at full health: a base that cannot fall, for watching the director over a long run.
+    private static GameSimulation Mended(GameSimulation sim)
+    {
+        foreach (var index in sim.World.Store<StructureInfo>().EntityIndices)
+        {
+            ref var health = ref sim.World.Store<Health>().Get(index);
+            health.Current = health.Max;
+        }
+
+        return sim;
+    }
+
+    // A Power Plant in the bottom-left corner (and, with two players, one bottom right for the second); a fed Spawning Pit
+    // top right; a director whose assaults may come every 300 ticks, starting at 20 creatures and growing by 10.
+    private static GameSimulation WaveMatch(
+        out Entity plant,
+        out Entity nest,
+        bool victory = false,
+        int players = 1,
+        int firstWave = 20,
+        MawDifficulty difficulty = MawDifficulty.Veteran,
+        int interval = WaveInterval)
     {
         var horde = new HordeSettings
         {
             CreatureType = 0,
             Population = 500,
             EdgeSpawns = false,
-            WaveIntervalTicks = WaveInterval,
-            FirstWaveSize = 20,
+            WaveIntervalTicks = interval,
+            FirstWaveSize = firstWave,
             WaveGrowth = 10,
+            Difficulty = difficulty,
         };
-        var sim = new GameSimulation(7, new GridMap(48, 48), TestMatch.Content, [new PlayerSetup(0, BulwarkContent.FactionId)],
-            victory, horde, goal: MatchGoal.Purge);
+        var setups = Enumerable.Range(0, players).Select(player => new PlayerSetup(player, BulwarkContent.FactionId)).ToArray();
+        var sim = new GameSimulation(7, new GridMap(48, 48), TestMatch.Content, setups, victory, horde, goal: MatchGoal.Purge);
         plant = sim.PlaceStructure(0, Structure(BulwarkContent.PowerPlant), new Cell(4, 40));
+        if (players > 1)
+        {
+            sim.PlaceStructure(1, Structure(BulwarkContent.PowerPlant), new Cell(40, 42));
+        }
+
         nest = sim.PlaceNest(Pit, new Cell(36, 20));
         for (var y = 14; y <= 30; y++)
         {

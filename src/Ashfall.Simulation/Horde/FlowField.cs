@@ -70,11 +70,15 @@ public sealed class FlowField
     /// <summary>True if <paramref name="cell"/> held a player structure when the field was built.</summary>
     public bool IsSource(Cell cell) => _map.InBounds(cell) && _source[_map.IndexOf(cell)];
 
-    /// <summary>Recomputes the field toward every structure owned by a player of <paramref name="simulation"/>.</summary>
-    public void Rebuild(GameSimulation simulation)
+    /// <summary>
+    /// Recomputes the field toward every structure owned by a player of <paramref name="simulation"/>, or only by
+    /// <paramref name="player"/>, and with <paramref name="refineriesOnly"/> only toward that player's refineries.
+    /// </summary>
+    public void Rebuild(GameSimulation simulation, int player = -1, bool refineriesOnly = false)
     {
         ArgumentNullException.ThrowIfNull(simulation);
         var owners = simulation.World.Store<Owner>();
+        var infos = simulation.World.Store<StructureInfo>();
         Array.Fill(_cost, Unreachable);
         Array.Clear(_source);
         foreach (var bucket in _buckets)
@@ -87,7 +91,9 @@ public sealed class FlowField
         for (var index = 0; index < _cost.Length; index++)
         {
             var structure = _map.StructureAt(_map.CellAt(index));
-            if (structure < 0 || !owners.Has(structure) || !simulation.IsPlayer(owners.Get(structure).PlayerId))
+            if (structure < 0 || !owners.Has(structure) || !simulation.IsPlayer(owners.Get(structure).PlayerId)
+                || (player >= 0 && owners.Get(structure).PlayerId != player)
+                || (refineriesOnly && simulation.Content.Structure(infos.Get(structure).StructureType).Role != Content.StructureRole.Refinery))
             {
                 continue;
             }

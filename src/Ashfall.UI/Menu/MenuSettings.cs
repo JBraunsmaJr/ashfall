@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using Ashfall.MapGen;
 using Ashfall.Session;
+using Ashfall.Simulation.Horde;
 
 namespace Ashfall.UI.Menu;
 
@@ -31,6 +32,9 @@ public sealed record MenuSettings
     /// <summary>Purge: the Maw's Spawning Pits.</summary>
     public int PurgeNests { get; init; } = MatchSpec.PurgeDefaultNests;
 
+    /// <summary>Purge: how hard the Maw's director pushes.</summary>
+    public MawDifficulty PurgeDifficulty { get; init; } = MawDifficulty.Veteran;
+
     /// <summary>The generated map for skirmish and hosting, or null for the hand-made map.</summary>
     public MapSettings? Map { get; init; } = MapSettings.Default(MapArchetypes.Crossroads, 1);
 
@@ -59,6 +63,7 @@ public sealed record MenuSettings
             "port=" + Port.ToString(CultureInfo.InvariantCulture),
             "allies=" + PurgeAllies.ToString(CultureInfo.InvariantCulture),
             "nests=" + PurgeNests.ToString(CultureInfo.InvariantCulture),
+            "difficulty=" + PurgeDifficulty.ToString().ToLowerInvariant(),
             "map=" + (Map?.ToCode() ?? "hand-made"),
         };
         lines.AddRange(RecentHosts.Select(h => "recent=" + h));
@@ -105,6 +110,9 @@ public sealed record MenuSettings
                     break;
                 case "nests" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var nests) && nests is >= 1 and <= MatchSpec.PurgeMaxNests:
                     settings = settings with { PurgeNests = nests };
+                    break;
+                case "difficulty" when Enum.TryParse<MawDifficulty>(value, ignoreCase: true, out var difficulty) && Enum.IsDefined(difficulty):
+                    settings = settings with { PurgeDifficulty = difficulty };
                     break;
                 case "map" when value == "hand-made":
                     settings = settings with { Map = null };

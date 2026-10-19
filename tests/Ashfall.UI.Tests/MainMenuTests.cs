@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using Ashfall.Rendering.Scene;
+using Ashfall.Simulation.Horde;
 using Ashfall.UI.Input;
 using Ashfall.MapGen;
 using Ashfall.UI.Menu;
@@ -284,16 +285,20 @@ public class MainMenuTests
         menu.Click("+", 0);
         Assert.False(menu.Enabled("+", 0)); // four players in all is the most
         menu.Click("-", 1);
+        menu.Click("VETERAN"); // the Maw's difficulty cycles on each click
+        menu.Click("ELITE");
         menu.Click("START");
 
         var choice = Assert.IsType<MenuChoice>(menu.Screen.Choice);
         Assert.Equal(MenuAction.Purge, choice.Action);
         Assert.Equal(3, choice.Settings.PurgeAllies);
         Assert.Equal(3, choice.Settings.PurgeNests);
+        Assert.Equal(MawDifficulty.Extinction, choice.Settings.PurgeDifficulty);
         Assert.NotNull(choice.Settings.Map);
 
         var reloaded = MenuSettings.Parse(choice.Settings.Serialize());
-        Assert.Equal((3, 3), (reloaded.PurgeAllies, reloaded.PurgeNests));
+        Assert.Equal((3, 3, MawDifficulty.Extinction), (reloaded.PurgeAllies, reloaded.PurgeNests, reloaded.PurgeDifficulty));
+        Assert.Equal(MawDifficulty.Veteran, MenuSettings.Parse("difficulty=godlike\n").PurgeDifficulty);
         Assert.Equal((1, 4), (MenuSettings.Parse("allies=9\nnests=0\n").PurgeAllies, MenuSettings.Parse("allies=9\nnests=0\n").PurgeNests));
     }
 

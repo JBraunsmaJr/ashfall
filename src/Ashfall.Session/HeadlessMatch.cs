@@ -250,6 +250,7 @@ public sealed class HeadlessMatch : IAsyncDisposable
             WaveIntervalTicks = MatchSpec.PurgeWaveIntervalTicks,
             FirstWaveSize = MatchSpec.PurgeFirstWaveSize(spec.Players),
             WaveGrowth = MatchSpec.PurgeWaveGrowth(spec.Players),
+            Difficulty = spec.Difficulty,
         };
         var simulation = new GameSimulation(spec.Seed, map.Grid, content, players, victoryEnabled: true, horde, cindriteRegrowth: true, MatchGoal.Purge);
         PlaceBases(spec, simulation, map, sources, out localPlayer);

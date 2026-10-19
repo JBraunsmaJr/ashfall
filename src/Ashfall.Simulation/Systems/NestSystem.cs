@@ -16,7 +16,8 @@ namespace Ashfall.Simulation.Systems;
 /// <remarks>
 /// Each feed takes from the richest cell in reach (lowest cell index on ties), so a nest grazes its field down
 /// evenly instead of boring one hole. Nests together never raise the Maw past
-/// <see cref="Horde.HordeSettings.Population"/> creatures alive.
+/// <see cref="Horde.HordeSettings.Population"/> creatures alive, nor (with a director) the brood past
+/// <see cref="Horde.MawState.PopulationLimit"/>.
 /// </remarks>
 public sealed class NestSystem : ISystem
 {
@@ -30,11 +31,6 @@ public sealed class NestSystem : ISystem
             return;
         }
 
-        if (maw.HasWaves && context.Tick >= maw.NextWaveTick)
-        {
-            LaunchWave(world, maw);
-        }
-
         if (nests.Count == 0)
         {
             return;
@@ -42,6 +38,22 @@ public sealed class NestSystem : ISystem
 
         var structures = world.Store<StructureInfo>();
         var creatures = world.Store<Creature>();
+
+        // With a director the limit is on the brood (what waits for the next wave), so survivors of the last wave
+        // still out fighting do not hold the next one back; without, it is on everything alive.
+        var brood = 0;
+        if (maw.HasWaves)
+        {
+            foreach (var creature in creatures.Components)
+            {
+                brood += creature.Brooding ? 1 : 0;
+            }
+        }
+        else
+        {
+            brood = creatures.Count;
+        }
+
         var indices = nests.EntityIndices;
         var states = nests.Components;
         for (var i = 0; i < states.Length; i++)
@@ -85,7 +97,7 @@ public sealed class NestSystem : ISystem
 
             var creatureType = nest.NextCreature;
             var cost = context.Content.Creature(creatureType).BiomassCost;
-            if (nest.Biomass < cost || creatures.Count >= maw.PopulationLimit
+            if (nest.Biomass < cost || creatures.Count >= maw.Settings.Population || brood >= maw.PopulationLimit
                 || !context.Navigator.TryFindNearestPassable(context.Simulation.ExitCell(info), maxRadius: 4, out var exit))
             {
                 continue; // starving, at the population limit, or walled in: try again next tick
@@ -97,24 +109,13 @@ public sealed class NestSystem : ISystem
             nest.Biomass -= cost;
             nest.SpawnTimer = rules.SpawnIntervalTicks;
             nest.NextCreature = -1;
+            brood += maw.HasWaves ? 1 : 0;
             maw.Spawned++;
             if (creatures.Count > maw.PeakAlive)
             {
                 maw.PeakAlive = creatures.Count;
             }
         }
-    }
-
-    // Every brooding creature marches on the players; the next wave is one interval away.
-    private static void LaunchWave(World world, Horde.MawState maw)
-    {
-        foreach (ref var creature in world.Store<Creature>().Components)
-        {
-            creature.Brooding = false;
-        }
-
-        maw.Waves++;
-        maw.NextWaveTick += maw.Settings.WaveIntervalTicks;
     }
 
     // The next creature, drawn from the spawn table by weight. The nest saves up for it, however long that takes,

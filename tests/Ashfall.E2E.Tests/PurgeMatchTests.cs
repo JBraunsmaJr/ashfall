@@ -5,6 +5,7 @@ using Ashfall.Session.Maps;
 using Ashfall.Session.Replays;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Components;
+using Ashfall.Simulation.Horde;
 using Ashfall.Simulation.Map;
 
 namespace Ashfall.E2E.Tests;
@@ -46,7 +47,8 @@ public class PurgeMatchTests
         await match.RunTicksAsync(300, TestContext.Current.CancellationToken);
         Assert.NotEmpty(world.Store<Creature>().EntityIndices.ToArray());
         Assert.All(world.Store<Creature>().Components.ToArray(), creature => Assert.True(creature.Brooding));
-        Assert.Equal(MatchSpec.PurgeGraceTicks + MatchSpec.PurgeWaveIntervalTicks, simulation.Maw.NextWaveTick);
+        Assert.Equal(0, simulation.Maw.Director!.Waves);
+        Assert.Equal(DirectorProfile.For(MawDifficulty.Veteran), simulation.Maw.Director.Profile); // the default
     }
 
     [Fact]
@@ -59,16 +61,18 @@ public class PurgeMatchTests
 
         Assert.True(result.IsOver);
         Assert.Equal(GameSimulation.MawTeam, result.WinningTeam);
-        Assert.True(result.FinalTick > MatchSpec.PurgeGraceTicks + MatchSpec.PurgeWaveIntervalTicks, "Nothing should attack before the first wave.");
+        // The first wave possible is a probe one harassment interval after the grace period, after half its warning.
+        var profile = DirectorProfile.For(MawDifficulty.Veteran);
+        Assert.True(result.FinalTick > MatchSpec.PurgeGraceTicks + profile.HarassIntervalTicks + (profile.TelegraphTicks / 2), "Nothing should attack before the first wave.");
         Assert.All(match.Simulation.Players, player => Assert.True(player.Defeated));
     }
 
     [Fact]
     public async Task Scripted_allies_can_purge_every_nest_and_the_match_plays_the_same_every_time()
     {
-        // The golden purge: two scripted AIs that win.
-        var first = await RunAsync(MatchSpec.Purge(1, players: 2));
-        var second = await RunAsync(MatchSpec.Purge(1, players: 2));
+        // The golden purge: two scripted AIs that win on Recruit.
+        var first = await RunAsync(MatchSpec.Purge(1, players: 2, difficulty: MawDifficulty.Recruit));
+        var second = await RunAsync(MatchSpec.Purge(1, players: 2, difficulty: MawDifficulty.Recruit));
 
         Assert.True(first.IsOver);
         Assert.Equal(0, first.WinningTeam);
@@ -80,7 +84,7 @@ public class PurgeMatchTests
     public async Task A_purge_with_a_person_in_it_is_recorded_and_replays_to_the_same_end()
     {
         await using var match = await HeadlessMatch.StartAsync(
-            MatchSpec.Purge(2, players: 2, nests: 2).WithController(0, PlayerController.Human), GameSpeed.Unthrottled);
+            MatchSpec.Purge(2, players: 2, nests: 2, difficulty: MawDifficulty.Elite).WithController(0, PlayerController.Human), GameSpeed.Unthrottled);
         var simulation = match.Simulation;
         var content = simulation.Content;
         var yard = simulation.World.EntityAt(simulation.World.Store<StructureInfo>().EntityIndices.ToArray()
@@ -92,15 +96,19 @@ public class PurgeMatchTests
         var site = Enumerable.Range(-8, 17).SelectMany(dy => Enumerable.Range(-8, 17).Select(dx => new Cell(origin.X + dx, origin.Y + dy)))
             .First(cell => simulation.CheckPlacement(0, plant, cell) == PlacementResult.Ok);
         match.LocalPlayer!.Enqueue(Ashfall.Simulation.Commands.Command.Build(0, plant, site));
-        await match.RunTicksAsync(MatchSpec.PurgeGraceTicks + MatchSpec.PurgeWaveIntervalTicks + 600, TestContext.Current.CancellationToken);
+        await match.RunTicksAsync(600, TestContext.Current.CancellationToken);
         Assert.Contains(simulation.World.Store<StructureInfo>().EntityIndices.ToArray(), index =>
             simulation.World.Store<Owner>().Get(index).PlayerId == 0 && simulation.World.Store<StructureInfo>().Get(index).StructureType == plant);
-        Assert.True(simulation.Maw!.Waves >= 1);
+
+        // Elite probes one harassment interval after the grace period ends.
+        await match.RunTicksAsync(MatchSpec.PurgeGraceTicks + 900, TestContext.Current.CancellationToken);
+        Assert.True(simulation.Maw!.Director!.Waves >= 1);
 
         var replay = Replay.Decode(Replay.From(match).Encode());
         Assert.Equal(MatchMode.Purge, replay.Spec.Mode);
         Assert.Equal(PlayerController.Remote, replay.Spec.Controllers[0]);
         Assert.Equal(2, replay.Spec.Nests);
+        Assert.Equal(MawDifficulty.Elite, replay.Spec.Difficulty);
         Assert.Equal(match.Spec.GeneratedMap, replay.Spec.GeneratedMap);
         Assert.True(replay.Verify().Matches);
     }
@@ -116,6 +124,8 @@ public class PurgeMatchTests
         Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Purge(1, players: 2).WithTeams(0, 1).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => (MatchSpec.Purge(1) with { GeneratedMap = null }).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Purge(1).WithMap(64, 64).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => MatchSpec.Purge(1, difficulty: (MawDifficulty)9).Validate());
+        Assert.Equal(MawDifficulty.Veteran, MatchSpec.Purge(1).Difficulty);
 
         var riverlands = MatchSpec.Purge(1, map: MapSettings.Default(MapArchetypes.Riverlands, 9));
         riverlands.Validate();

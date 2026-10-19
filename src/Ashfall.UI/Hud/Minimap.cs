@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using Ashfall.Rendering;
+using Ashfall.Rendering.Scene;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Map;
@@ -83,6 +84,25 @@ internal static class Minimap
             }
 
             canvas.Rect(area.X + (position.X * cell) - (speck / 2), area.Y + (position.Y * cell) - (speck / 2), speck, speck, mawDot);
+        }
+
+        // A telegraphed wave, through fog: a pulsing ring where it will emerge and a line to the base it is for.
+        if (simulation.Maw?.Director?.Pending is { } order && order.Source.X >= 0)
+        {
+            var source = new Vector2(area.X + ((order.Source.X + 0.5f) * cell), area.Y + ((order.Source.Y + 0.5f) * cell));
+            var pulse = (simulation.Tick % 15) / 15f;
+            var warn = order.Kind == Simulation.Horde.WaveKind.Probe ? Palette.Credits : Palette.TextWarn;
+            foreach (var target in new[] { order.Target, order.SecondTarget })
+            {
+                if (target >= 0 && MawTelegraph.BaseOf(simulation, target) is { } home)
+                {
+                    canvas.Line(source, new Vector2(area.X, area.Y) + (home * cell), 1.5f, Palette.WithAlpha(warn, 0.6f));
+                }
+            }
+
+            var radius = (3f + (pulse * 5f)) * MathF.Max(1f, cell);
+            canvas.Disc(source, radius, radius, Palette.WithAlpha(warn, 1f - pulse), QuadShape.Ring);
+            canvas.Disc(source, 2.5f, 2.5f, warn);
         }
 
         // The camera's view: the ground under the viewport's four corners.

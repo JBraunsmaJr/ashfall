@@ -278,6 +278,25 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         }
     }
 
+    /// <summary>
+    /// The ground where a telegraphed wave will emerge (shown through fog, GDD section 3): tremor rings spreading out
+    /// from the nest's mouth over a hot glow, beating faster as the launch nears.
+    /// </summary>
+    public void PaintTelegraph(GameSimulation simulation, Cell source, float urgency, double time, LinearColor color)
+    {
+        var center = new Vector2(source.X + 0.5f, source.Y + 0.5f);
+        batch.Begin(source.X + source.Y + 0.45f, GroundHeight(simulation.Map, center.X, center.Y));
+        batch.Disc(center, 2.2f, GroundEpsilon * 4, Palette.WithAlpha(color, 0.25f + (0.25f * urgency)), emissive: 0.6f, shape: QuadShape.Glow);
+        var speed = 0.8 + (2.2 * urgency);
+        for (var ring = 0; ring < 3; ring++)
+        {
+            var phase = (float)(((time * speed) + (ring / 3.0)) % 1.0);
+            batch.Disc(center, 0.6f + (phase * 3.4f), GroundEpsilon * 5, Palette.WithAlpha(color, 0.7f * (1f - phase)), emissive: 0.8f, shape: QuadShape.Ring);
+        }
+
+        batch.End();
+    }
+
     /// <summary>A translucent footprint for the structure being placed: green where it can go, red where not.</summary>
     public void PaintPlacement(GameSimulation simulation, int structureType, Cell origin, bool valid)
     {

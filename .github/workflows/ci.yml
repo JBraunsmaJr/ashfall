@@ -82,10 +82,10 @@ jobs:
           --hash-out nests-${{ runner.os }}.hash
           --checkpoints-out nests-${{ runner.os }}.checkpoints
 
-      - name: Co-op Purge - two scripted allies against the Maw's nests, played to a result, twice, must match
+      - name: Co-op Purge - two scripted allies against the Maw's nests on Recruit, played to a result, twice, must match
         run: >
           dotnet run --project src/Ashfall.Headless -c Release --no-build --
-          --mode purge --players 2 --seed 1
+          --mode purge --players 2 --seed 1 --difficulty recruit
           --repeat 2
           --hash-out purge-${{ runner.os }}.hash
           --checkpoints-out purge-${{ runner.os }}.checkpoints

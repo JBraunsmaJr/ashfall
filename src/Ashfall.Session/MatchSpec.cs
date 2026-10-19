@@ -2,6 +2,7 @@ using Ashfall.Core;
 using Ashfall.MapGen;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
+using Ashfall.Simulation.Horde;
 
 namespace Ashfall.Session;
 
@@ -92,6 +93,9 @@ public sealed record MatchSpec
     /// </summary>
     public int Nests { get; init; }
 
+    /// <summary>Purge only: how hard the Maw's director pushes (GDD section 3).</summary>
+    public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
+
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
 
@@ -137,7 +141,12 @@ public sealed record MatchSpec
     /// </summary>
     /// <param name="map">The generated map; null for the default Crossroads map with the match seed.</param>
     public static MatchSpec Purge(
-        ulong seed, int players = 1, int nests = PurgeDefaultNests, int creatures = PurgeDefaultCreatures, MapSettings? map = null)
+        ulong seed,
+        int players = 1,
+        int nests = PurgeDefaultNests,
+        int creatures = PurgeDefaultCreatures,
+        MapSettings? map = null,
+        MawDifficulty difficulty = MawDifficulty.Veteran)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(players, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(players, PurgeMaxPlayers);
@@ -154,6 +163,7 @@ public sealed record MatchSpec
             GeneratedMap = settings,
             Creatures = creatures,
             Nests = nests,
+            Difficulty = difficulty,
         };
     }
 
@@ -277,6 +287,11 @@ public sealed record MatchSpec
             if (Teams.Any(team => team != Teams[0]))
             {
                 throw new ArgumentOutOfRangeException(nameof(Teams), "A Purge is co-op: every player is on one team.");
+            }
+
+            if (!Enum.IsDefined(Difficulty))
+            {
+                throw new ArgumentOutOfRangeException(nameof(Difficulty), Difficulty, "Unknown difficulty.");
             }
 
             ArgumentOutOfRangeException.ThrowIfLessThan(Nests, 1, nameof(Nests));

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Ashfall.MapGen;
 using Ashfall.Session;
+using Ashfall.Simulation.Horde;
 
 namespace Ashfall.Headless;
 
@@ -36,6 +37,7 @@ internal sealed record HeadlessOptions
                                   Purge: the most alive at once (default 1500)
           --nests <n>             Swarm: breed from n Spawning Pits (0-8) instead of the map edges
                                   Purge: Spawning Pits on the map's fields (1-12, default 4)
+          --difficulty <tier>     Purge: recruit | veteran | elite | extinction (default veteran)
           --tick-budget-ms <ms>   Swarm only: fail (exit 6) if the mean tick time exceeds this
           --map <n>               Proving only: square map size in cells (default 64)
           --speed <speed>         unthrottled | 1x | 4x | 0.5x | 1/2x (default unthrottled)
@@ -89,6 +91,9 @@ internal sealed record HeadlessOptions
 
     /// <summary>Explicit --nests value, if given (the default depends on the mode).</summary>
     public int? Nests { get; init; }
+
+    /// <summary>Purge only: how hard the Maw's director pushes.</summary>
+    public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
 
     /// <summary>Swarm only: the largest acceptable mean tick time in milliseconds, or null for no limit.</summary>
     public int? TickBudgetMs { get; init; }
@@ -174,7 +179,7 @@ internal sealed record HeadlessOptions
         MatchMode.Skirmish =>
             (Teams is null ? MatchSpec.Skirmish(Seed, Players) : MatchSpec.Skirmish(Seed, Players).WithTeams([.. Teams])).WithGeneratedMap(GeneratedMap),
         MatchMode.Swarm => MatchSpec.Swarm(Seed, Creatures ?? MatchSpec.SwarmDefaultCreatures, Nests ?? 0),
-        MatchMode.Purge => MatchSpec.Purge(Seed, Players, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, GeneratedMap),
+        MatchMode.Purge => MatchSpec.Purge(Seed, Players, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, GeneratedMap, Difficulty),
         _ => MatchSpec.ProvingGround(Seed)
             .WithPlayers(Players)
             .WithUnitsPerPlayer(Units)
@@ -216,6 +221,7 @@ internal sealed record HeadlessOptions
                 "--teams" => TryTeams(value, v => options = options with { Teams = v }),
                 "--units" => TryInt32(value, 0, v => options = options with { Units = v }),
                 "--creatures" => TryInt32(value, 0, v => options = options with { Creatures = v }) && options.Creatures <= MatchSpec.SwarmMaxCreatures,
+                "--difficulty" => TryDifficulty(value, v => options = options with { Difficulty = v, Mode = MatchMode.Purge }),
                 "--nests" => TryInt32(value, 0, v => options = options with { Nests = v }) && options.Nests <= MatchSpec.PurgeMaxNests,
                 "--tick-budget-ms" => TryInt32(value, 1, v => options = options with { TickBudgetMs = v }),
                 "--map" => TryInt32(value, 1, v => options = options with { MapSize = v }),
@@ -331,6 +337,20 @@ internal sealed record HeadlessOptions
 
     // A generated-map option implies a skirmish unless the mode already plays generated maps.
     private static MatchMode MapMode(MatchMode current) => current == MatchMode.Purge ? MatchMode.Purge : MatchMode.Skirmish;
+
+    private static bool TryDifficulty(string text, Action<MawDifficulty> apply)
+    {
+        foreach (var difficulty in Enum.GetValues<MawDifficulty>())
+        {
+            if (string.Equals(text, difficulty.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                apply(difficulty);
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool TryMode(string text, Action<MatchMode> apply)
     {

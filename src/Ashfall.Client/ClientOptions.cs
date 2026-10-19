@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using Ashfall.MapGen;
 using Ashfall.Session;
+using Ashfall.Simulation.Horde;
 
 namespace Ashfall.Client;
 
@@ -41,6 +42,7 @@ internal sealed record ClientOptions
           --purge                Co-op against the Maw: destroy every nest on a generated map (crossroads
                                  by default; --archetype, --map-code and --slider pick another)
           --allies <n>           With --purge: scripted-AI allies on your team (0-3, default 1)
+          --difficulty <tier>    With --purge: recruit, veteran, elite or extinction (default veteran)
           --swarm                Hold the line: command the Bulwark fortress against the Maw
           --nests <n>            With --swarm: the Maw breeds from n Spawning Pits (1-8, default 4) that feed
                                  and evolve; 0 sends a horde from the map edges instead
@@ -78,6 +80,9 @@ internal sealed record ClientOptions
 
     /// <summary>Purge: scripted-AI allies on the local player's team.</summary>
     public int Allies { get; init; } = 1;
+
+    /// <summary>Purge: how hard the Maw's director pushes.</summary>
+    public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
 
     /// <summary>Explicit --nests, if given (swarm default 4, Purge default <see cref="MatchSpec.PurgeDefaultNests"/>).</summary>
     public int? Nests { get; init; }
@@ -157,7 +162,7 @@ internal sealed record ClientOptions
         {
             var map = GeneratedMap ?? MapSettings.Default(MapArchetypes.Crossroads, (uint)(Seed & uint.MaxValue));
             var purge = MatchSpec.Purge(
-                Seed, 1 + Allies, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, map);
+                Seed, 1 + Allies, Nests ?? MatchSpec.PurgeDefaultNests, Creatures ?? MatchSpec.PurgeDefaultCreatures, map, Difficulty);
             return Spectate ? purge : purge.WithController(0, PlayerController.Human);
         }
 
@@ -230,6 +235,9 @@ internal sealed record ClientOptions
                     break;
                 case "--creatures" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var creatures) && creatures is >= 1 and <= MatchSpec.SwarmMaxCreatures:
                     options = options with { Creatures = creatures, Swarm = !options.Purge, SkirmishImplied = true };
+                    break;
+                case "--difficulty" when Enum.TryParse<MawDifficulty>(value, ignoreCase: true, out var difficulty) && Enum.IsDefined(difficulty) && !int.TryParse(value, out _):
+                    options = options with { Difficulty = difficulty, Purge = true, Swarm = false, SkirmishImplied = true };
                     break;
                 case "--allies" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var allies) && allies < MatchSpec.PurgeMaxPlayers:
                     options = options with { Allies = allies, Purge = true, Swarm = false, SkirmishImplied = true };

@@ -114,7 +114,20 @@ public sealed class SwarmSystem : ISystem
                 continue;
             }
 
-            FollowField(simulation, field, definition, index, ref creature, ref position);
+            // A wave the director aimed follows its own field; once its target has nothing of that kind left, it
+            // goes for the nearest player structure like the rest.
+            var way = field;
+            if (creature.Goal != SwarmGoal.Nearest)
+            {
+                way = simulation.FieldFor(creature.Goal);
+                if (way.SourceCells == 0)
+                {
+                    creature.Goal = SwarmGoal.Nearest;
+                    way = field;
+                }
+            }
+
+            FollowField(simulation, way, definition, index, ref creature, ref position);
         }
     }
 

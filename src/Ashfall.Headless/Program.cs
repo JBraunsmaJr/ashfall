@@ -50,7 +50,7 @@ Console.WriteLine(spec.Mode switch
         $"mode=skirmish seed={spec.Seed} players={spec.Players} teams={string.Join(',', spec.Teams)} map={spec.Map.Width}x{spec.Map.Height} {(spec.GeneratedMap is { } generated ? generated.Archetype.Name + " " + generated.ToCode() : "hand-made")} tick-limit={options.Ticks} speed={options.Speed}"),
     MatchMode.Purge => string.Create(
         CultureInfo.InvariantCulture,
-        $"mode=purge seed={spec.Seed} players={spec.Players} controllers={string.Join(',', spec.Controllers)} nests={spec.Nests} creatures={spec.Creatures} map={spec.Map.Width}x{spec.Map.Height} {spec.GeneratedMap!.Archetype.Name} {spec.GeneratedMap.ToCode()} tick-limit={options.Ticks} speed={options.Speed}"),
+        $"mode=purge seed={spec.Seed} players={spec.Players} controllers={string.Join(',', spec.Controllers)} nests={spec.Nests} creatures={spec.Creatures} difficulty={spec.Difficulty} map={spec.Map.Width}x{spec.Map.Height} {spec.GeneratedMap!.Archetype.Name} {spec.GeneratedMap.ToCode()} tick-limit={options.Ticks} speed={options.Speed}"),
     MatchMode.Swarm => string.Create(
         CultureInfo.InvariantCulture,
         $"mode=swarm seed={spec.Seed} creatures={spec.Creatures} nests={spec.Nests} map={spec.Map.Width}x{spec.Map.Height} ticks={options.Ticks} tick-budget={(options.TickBudgetMs is { } budget ? budget + "ms" : "none")}"),
@@ -87,7 +87,7 @@ for (var run = 1; run <= options.Repeat; run++)
         MatchMode.Skirmish => " winner=none (tick limit reached)",
         MatchMode.Purge when result.IsOver => string.Create(
             CultureInfo.InvariantCulture,
-            $" result={MatchReport.Outcome(match.Simulation)} ({result.FinalTick / 900.0:F1} game minutes, {match.Simulation.Maw!.Killed} creatures killed)"),
+            $" result={MatchReport.Outcome(match.Simulation)} ({result.FinalTick / 900.0:F1} game minutes, {match.Simulation.Maw!.Killed} creatures killed, {match.Simulation.Maw.Director!.Waves} waves of which {match.Simulation.Maw.Director.Assaults} assaults)"),
         MatchMode.Purge => " result=none (tick limit reached)",
         _ => string.Empty,
     };
