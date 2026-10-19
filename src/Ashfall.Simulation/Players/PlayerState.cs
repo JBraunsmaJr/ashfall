@@ -38,6 +38,9 @@ public sealed class PlayerState
 
     public bool Defeated { get; internal set; }
 
+    /// <summary>Lasting bonuses from the campaign: research and commander perks. Fixed for the match.</summary>
+    public PlayerModifiers Modifiers { get; init; } = PlayerModifiers.None;
+
     public bool CanAfford(int cost) => cost <= Credits;
 
     internal void Spend(int cost)
@@ -67,5 +70,9 @@ public sealed class PlayerState
         hasher.Add(ConstructionSite.Index);
         hasher.Add(ConstructionSite.Generation);
         hasher.Add(Defeated);
+        if (!Modifiers.IsNone)
+        {
+            Modifiers.HashInto(ref hasher); // only when set, so matches without bonuses hash as they always have
+        }
     }
 }

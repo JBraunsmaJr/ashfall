@@ -26,7 +26,8 @@ internal static class SkirmishClient
     /// Plays <paramref name="spec"/> (by default the match the options describe) until it is left or the window closes.
     /// Returns the campaign result read from its end state, or null if it was left before it ended.
     /// </summary>
-    public static async Task<MissionResult?> Run(GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options, MatchSpec? spec = null)
+    public static async Task<MissionResult?> Run(
+        GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options, MatchSpec? spec = null, CampaignMission? mission = null, CampaignRules? rules = null)
     {
         await using var match = await HeadlessMatch.StartAsync(spec ?? options.ToSpec(), options.Speed).ConfigureAwait(false);
         if (options.Autopilot && match.LocalPlayer is { } local)
@@ -143,7 +144,7 @@ internal static class SkirmishClient
             CultureInfo.InvariantCulture,
             $"Presented {renderer.FramesPresented} frames at {renderer.RenderSize} in {clock.Elapsed.TotalSeconds:F1}s ({renderer.LastQuadCount} quads in the last); " +
             $"swapchain built {renderer.SwapchainGenerations}x; simulation at tick {match.Tick} ({result}), state {StateHasher.Format(match.Simulation.ComputeStateHash())}."));
-        return match.IsOver ? CampaignMatches.ResultOf(match) : null;
+        return match.IsOver ? CampaignMatches.ResultOf(match, mission, rules) : null;
     }
 
     /// <summary>How far between the previous tick and the next the frame is, for interpolation.</summary>

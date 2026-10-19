@@ -123,14 +123,57 @@ public class CampaignScreenTests
         }
     }
 
+    [Fact]
+    public void Research_is_bought_from_its_tab_and_only_when_affordable()
+    {
+        var campaign = CampaignState.Start(5, CampaignRuleSets.Quick, MawDifficulty.Veteran);
+        var ui = new Driver(campaign);
+        ui.Click("RESEARCH");
+        Assert.Equal(CampaignView.Research, ui.Screen.View);
+        Assert.False(ui.Enabled("HARDENED ROUNDS - 20")); // no samples yet
+
+        campaign.Play(new TurnRecord(CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty, MissionResult.Victory(2, samples: 30)));
+        ui = new Driver(campaign) { };
+        ui.Screen.View = CampaignView.Research;
+        ui.Frame();
+        Assert.False(ui.Enabled("DEPLETED CORES - 45")); // needs Hardened Rounds first
+        ui.Click("HARDENED ROUNDS - 20");
+        var choice = Assert.IsType<CampaignChoice>(ui.Screen.Choice);
+        Assert.Equal(CampaignChoiceKind.Research, choice.Kind);
+        Assert.Equal("weapons-1", choice.Research);
+    }
+
+    [Fact]
+    public void The_commander_tab_switches_commanders_and_toggles_unlocked_perks()
+    {
+        var profile = new CommanderProfile();
+        profile.AddExperience(120); // level 2
+        var ui = new Driver(CampaignState.Start(5, CampaignRuleSets.Quick, MawDifficulty.Veteran), profile: profile);
+        ui.Click("COMMANDER");
+        var kova = Commanders.Find("kova")!;
+        Assert.Equal(kova, profile.Active);
+        Assert.Equal(2, profile.ActivePerks.Count); // levels 1 and 2 switched on as they came
+        ui.Click("HOLD THE LINE - ON");
+        Assert.Single(profile.ActivePerks);
+        Assert.False(ui.Enabled("FIELD REPAIRS - LEVEL 3"));
+        ui.Click("REYES");
+        Assert.Equal("reyes", profile.Active.Id);
+
+        // The mission panel shows the seat's bonuses.
+        profile.Lead(kova);
+        ui.Click("MISSION");
+        Assert.Contains("BONUSES", string.Join(" ", ui.Screen.PlannedMission is { } mission ? ["BONUSES"] : Array.Empty<string>()), StringComparison.Ordinal);
+        Assert.Equal(105, ui.Screen.PlannedMission!.Loadouts[0].Modifiers.UnitHealthPercent);
+    }
+
     private sealed class Driver
     {
         private readonly InputState _input = new() { Mouse = new Vector2(5, 5) };
         private double _time;
 
-        public Driver(CampaignState campaign, TurnReport? last = null)
+        public Driver(CampaignState campaign, TurnReport? last = null, CommanderProfile? profile = null)
         {
-            Screen = new CampaignScreen(campaign, allies: 1, last);
+            Screen = new CampaignScreen(campaign, allies: 1, last, commander: profile);
             Frame();
         }
 

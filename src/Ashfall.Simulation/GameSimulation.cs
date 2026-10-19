@@ -89,7 +89,11 @@ public sealed class GameSimulation
         {
             var faction = content.FactionIndex(players[id].FactionId);
             ArgumentOutOfRangeException.ThrowIfNegative(players[id].BonusCredits, nameof(players));
-            _players[id] = new PlayerState(id, players[id].Team, faction, content.Economy.StartingCredits + players[id].BonusCredits);
+            _players[id] = new PlayerState(id, players[id].Team, faction, content.Economy.StartingCredits + players[id].BonusCredits)
+            {
+                Modifiers = players[id].Modifiers ?? PlayerModifiers.None,
+            };
+            _players[id].Modifiers.Validate();
         }
 
         // Registration order is part of the state hash: append new component types at the end.
@@ -203,7 +207,14 @@ public sealed class GameSimulation
         World.Add(unit, new Position(Bounds.Clamp(position)));
         World.Add(unit, Mover.Idle(definition.SpeedPerTick));
         World.Add(unit, new Owner(playerId));
-        World.Add(unit, new Health(definition.Health, definition.Health, definition.Armor));
+        var health = definition.Health;
+        if (IsPlayer(playerId) && _players[playerId].Modifiers is { IsNone: false } modifiers)
+        {
+            health = PlayerModifiers.Apply(health, modifiers.UnitHealthPercent);
+            health = definition.IsHarvester ? PlayerModifiers.Apply(health, modifiers.HarvesterHealthPercent) : health;
+        }
+
+        World.Add(unit, new Health(health, health, definition.Armor));
         World.Add(unit, new UnitInfo(unitType));
         World.Add(unit, UnitOrder.Idle);
         if (definition.Weapon is not null)
@@ -307,7 +318,8 @@ public sealed class GameSimulation
             Fix64.FromInt(origin.Y) + Fix64.FromRatio(definition.Height, 2));
         World.Add(structure, new Position(center));
         World.Add(structure, new Owner(playerId));
-        World.Add(structure, new Health(definition.Health, definition.Health, definition.Armor));
+        var health = IsPlayer(playerId) ? PlayerModifiers.Apply(definition.Health, _players[playerId].Modifiers.StructureHealthPercent) : definition.Health;
+        World.Add(structure, new Health(health, health, definition.Armor));
         World.Add(structure, new StructureInfo(structureType, origin, complete ? 0 : definition.BuildTicks));
         if (definition.Role is StructureRole.Barracks or StructureRole.Factory)
         {

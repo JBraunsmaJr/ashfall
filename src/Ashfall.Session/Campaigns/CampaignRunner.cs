@@ -17,7 +17,10 @@ public sealed record PlayedMission(CampaignMission Mission, MatchSpec Spec, Miss
 /// </summary>
 public static class CampaignRunner
 {
-    /// <summary>Plays <paramref name="target"/> as this turn's mission with <paramref name="players"/> scripted AIs.</summary>
+    /// <summary>
+    /// Plays <paramref name="target"/> as this turn's mission with <paramref name="players"/> scripted AIs (no commander
+    /// perks), buying nothing: research is the players' choice.
+    /// </summary>
     public static async Task<PlayedMission> PlayTurnAsync(
         CampaignState campaign,
         CampaignTarget target,
@@ -28,11 +31,11 @@ public static class CampaignRunner
     {
         ArgumentNullException.ThrowIfNull(campaign);
         var played = difficulty ?? campaign.Difficulty;
-        var mission = campaign.PlanMission(target, played);
-        var spec = CampaignMatches.ToMatchSpec(mission, players);
+        var mission = campaign.PlanMission(target, played, players);
+        var spec = CampaignMatches.ToMatchSpec(mission);
         await using var match = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled).ConfigureAwait(false);
         await match.RunToCompletionAsync(tickLimit, cancellationToken).ConfigureAwait(false);
-        var result = CampaignMatches.ResultOf(match);
+        var result = CampaignMatches.ResultOf(match, mission, campaign.Rules);
         var report = campaign.Play(new TurnRecord(target, played, result));
         return new PlayedMission(mission, spec, result, report);
     }

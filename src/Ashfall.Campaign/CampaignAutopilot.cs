@@ -66,22 +66,27 @@ public static class CampaignAutopilot
         return best >= 0 ? CampaignTarget.Region(best) : campaign.Targets.Count > 0 ? campaign.Targets[0] : default;
     }
 
-    /// <summary>A dice roll for <paramref name="mission"/>: the skill percentage, less for more and stronger nests and harder difficulty.</summary>
-    public static MissionResult Resolve(CampaignMission mission, int skillPercent, DeterministicRandom random)
+    /// <summary>
+    /// A dice roll for <paramref name="mission"/>: the skill percentage, less for more and stronger nests and harder
+    /// difficulty, more for bonuses and research. Samples are earned as <paramref name="rules"/> say (none if null).
+    /// </summary>
+    public static MissionResult Resolve(CampaignMission mission, int skillPercent, DeterministicRandom random, CampaignRules? rules = null)
     {
         ArgumentNullException.ThrowIfNull(mission);
         ArgumentNullException.ThrowIfNull(random);
+        var team = mission.Loadouts.Count > 0 ? mission.Loadouts[0] : null;
+        var research = team is null ? 0 : (team.Modifiers.DamagePercent - 100 + team.Modifiers.UnitHealthPercent - 100) / 4;
         var chance = skillPercent - (3 * (mission.Nests - 2)) - (8 * (mission.NestTier - 1)) - (5 * (int)mission.Difficulty)
-            + (2 * (mission.BonusCredits / 500)) + (3 * mission.BonusHarvesters);
+            + (2 * (mission.BonusCredits / 500)) + (3 * mission.BonusHarvesters) + research;
         chance = chance < 5 ? 5 : chance > 95 ? 95 : chance;
         var ticks = 27_000 + (mission.Nests * 1_500);
         if (random.Next(100) < chance)
         {
-            return MissionResult.Victory(mission.Nests, ticks);
+            return MissionResult.Victory(mission.Nests, ticks, rules?.SamplesFor(true, mission.Nests, mission.NestTier) ?? 0);
         }
 
         var destroyed = random.Next(mission.Nests);
-        return MissionResult.Defeat(destroyed, mission.Nests - destroyed, ticks);
+        return MissionResult.Defeat(destroyed, mission.Nests - destroyed, ticks, rules?.SamplesFor(false, destroyed, mission.NestTier) ?? 0);
     }
 
     /// <summary>Plays <paramref name="campaign"/> until it ends or <paramref name="maxTurns"/> turns have gone by.</summary>
@@ -98,14 +103,25 @@ public static class CampaignAutopilot
                 return new AutopilotRun(campaign.Turn, campaign.Outcome, wins, peak, Stuck: true);
             }
 
+            BuyResearch(campaign);
             var target = ChooseTarget(campaign);
-            var result = Resolve(campaign.PlanMission(target), skillPercent, random);
+            var result = Resolve(campaign.PlanMission(target), skillPercent, random, campaign.Rules);
             campaign.Play(new TurnRecord(target, campaign.Difficulty, result));
             wins += result.Won ? 1 : 0;
             peak = campaign.Meter > peak ? campaign.Meter : peak;
         }
 
         return new AutopilotRun(campaign.Turn, campaign.Outcome, wins, peak, Stuck: false);
+    }
+
+    /// <summary>Spends samples on the cheapest research available, as long as any is affordable.</summary>
+    public static void BuyResearch(CampaignState campaign)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        while (campaign.Rules.Research.Where(node => campaign.CanResearch(node.Id, out _)).OrderBy(node => node.Cost).FirstOrDefault() is { } next)
+        {
+            campaign.Research(next.Id);
+        }
     }
 
     private static int Severity(CampaignEventKind kind) => kind switch

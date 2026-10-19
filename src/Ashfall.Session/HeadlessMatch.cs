@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Ashfall.Content;
 using Ashfall.Core;
 using Ashfall.Session.Ai;
@@ -9,6 +9,7 @@ using Ashfall.Simulation.Commands;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
 using Ashfall.Simulation.Horde;
+using Ashfall.Simulation.Map;
 using Ashfall.Simulation.Players;
 
 namespace Ashfall.Session;
@@ -241,7 +242,8 @@ public sealed class HeadlessMatch : IAsyncDisposable
         var players = new PlayerSetup[spec.Players];
         for (var player = 0; player < players.Length; player++)
         {
-            players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId, spec.BonusCredits);
+            var loadout = player < spec.Loadouts.Count ? spec.Loadouts[player] : PlayerLoadout.None;
+            players[player] = new PlayerSetup(spec.Teams[player], BulwarkContent.FactionId, spec.BonusCredits + loadout.Credits, loadout.Modifiers);
         }
 
         var map = matchMap = MatchMap.Create(spec.GeneratedMap, spec.Players, coop: true);
@@ -257,15 +259,23 @@ public sealed class HeadlessMatch : IAsyncDisposable
             FirstWaveSize = MatchSpec.PurgeFirstWaveSize(spec.Players),
             WaveGrowth = MatchSpec.PurgeWaveGrowth(spec.Players),
             Difficulty = spec.Difficulty,
+            TelegraphBonusTicks = spec.TelegraphBonusTicks,
         };
         var simulation = new GameSimulation(spec.Seed, map.Grid, content, players, victoryEnabled: true, horde, cindriteRegrowth: true, MatchGoal.Purge);
         var yards = PlaceBases(spec, simulation, map, sources, out localPlayer);
         var harvester = content.UnitIndex(BulwarkContent.Harvester);
-        foreach (var yard in yards)
+        for (var player = 0; player < yards.Length; player++)
         {
-            for (var i = 0; i < spec.BonusHarvesters; i++)
+            var loadout = player < spec.Loadouts.Count ? spec.Loadouts[player] : PlayerLoadout.None;
+            for (var i = 0; i < spec.BonusHarvesters + loadout.Harvesters; i++)
             {
-                simulation.SpawnUnitAt(yard, harvester);
+                simulation.SpawnUnitAt(yards[player], harvester);
+            }
+
+            // The veteran detachment lands beside the yard.
+            foreach (var unit in loadout.Units)
+            {
+                simulation.SpawnUnitAt(yards[player], content.UnitIndex(unit));
             }
         }
 
@@ -274,6 +284,19 @@ public sealed class HeadlessMatch : IAsyncDisposable
         if (PurgeNests.Place(simulation, starts, spec.Nests, nest) == 0)
         {
             throw new InvalidOperationException($"The map {map.Name} has no Cindrite field far enough from the bases for a nest.");
+        }
+
+        if (spec.RevealNests)
+        {
+            // Seismic mapping: every player starts knowing where every nest is.
+            foreach (var index in simulation.World.Store<Nest>().EntityIndices)
+            {
+                var origin = simulation.World.Store<StructureInfo>().Get(index).Origin;
+                for (var player = 0; player < spec.Players; player++)
+                {
+                    simulation.Visibility.Reveal(player, new Cell(origin.X + 1, origin.Y + 1), 3);
+                }
+            }
         }
 
         return simulation;

@@ -2,6 +2,7 @@
 using Ashfall.Core;
 using Ashfall.Simulation.Components;
 using Ashfall.Simulation.Ecs;
+using Ashfall.Simulation.Players;
 
 namespace Ashfall.Simulation.Systems;
 
@@ -42,13 +43,22 @@ public sealed class WeaponSystem : ISystem
 
             var impact = context.Simulation.ClosestPointOf(target, position);
             ref var health = ref world.Get<Health>(target);
-            health.Hit(DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor), unit);
+            health.Hit(DamageTable.Apply(DamageOf(context, unit, weapon), weapon.Warhead, health.Armor), unit);
             armament.Cooldown = weapon.CooldownTicks;
             if (weapon.SplashRadius > Fix64.Zero)
             {
                 Splash(context, unit, world.Get<Owner>(unit).PlayerId, target, impact, weapon);
             }
         }
+    }
+
+    // A weapon's base damage, raised by its owner's campaign bonuses.
+    private static int DamageOf(in TickContext context, Entity shooter, WeaponDefinition weapon)
+    {
+        var owner = context.World.Get<Owner>(shooter).PlayerId;
+        return context.Simulation.IsPlayer(owner) && context.Players[owner].Modifiers.DamagePercent != 100
+            ? PlayerModifiers.Apply(weapon.Damage, context.Players[owner].Modifiers.DamagePercent)
+            : weapon.Damage;
     }
 
     // Every other enemy unit or creature within the splash radius of the impact point takes the same hit, in
@@ -77,7 +87,7 @@ public sealed class WeaponSystem : ISystem
                     }
 
                     ref var health = ref healths.Get(index);
-                    health.Hit(DamageTable.Apply(weapon.Damage, weapon.Warhead, health.Armor), shooter);
+                    health.Hit(DamageTable.Apply(DamageOf(context, shooter, weapon), weapon.Warhead, health.Armor), shooter);
                 }
             }
         }

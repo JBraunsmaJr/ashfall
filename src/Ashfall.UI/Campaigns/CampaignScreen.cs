@@ -18,11 +18,26 @@ public enum CampaignChoiceKind
 
     /// <summary>Save and go back to the main menu.</summary>
     Leave,
+
+    /// <summary>Spend samples on the research project <see cref="CampaignChoice.Research"/>.</summary>
+    Research,
+}
+
+/// <summary>The panels the campaign screen can show beside the map.</summary>
+public enum CampaignView
+{
+    Mission,
+    Research,
+    Commander,
 }
 
 /// <summary>A decision on the campaign screen, handed to the client.</summary>
 /// <param name="Difficulty">The difficulty to play on: the campaign's, or lower if the player lowered it.</param>
-public sealed record CampaignChoice(CampaignChoiceKind Kind, CampaignTarget Target, MawDifficulty Difficulty);
+public sealed record CampaignChoice(CampaignChoiceKind Kind, CampaignTarget Target, MawDifficulty Difficulty)
+{
+    /// <summary>For <see cref="CampaignChoiceKind.Research"/>: the project's id.</summary>
+    public string? Research { get; init; }
+}
 
 /// <summary>
 /// The campaign screen (GDD section 7): the world map with regions coloured by who holds them and how infested they
@@ -40,8 +55,9 @@ public sealed class CampaignScreen
     private double _time;
     private CampaignTarget? _selected;
     private MawDifficulty _difficulty;
+    private string? _hint;
 
-    public CampaignScreen(CampaignState campaign, int allies, TurnReport? lastTurn = null, string? message = null)
+    public CampaignScreen(CampaignState campaign, int allies, TurnReport? lastTurn = null, string? message = null, CommanderProfile? commander = null)
     {
         ArgumentNullException.ThrowIfNull(campaign);
         _campaign = campaign;
@@ -49,8 +65,34 @@ public sealed class CampaignScreen
         Allies = allies;
         LastTurn = lastTurn;
         Message = message;
+        Commander = commander;
         _selected = campaign.Targets.Count > 0 ? CampaignAutopilot.ChooseTarget(campaign) : null;
     }
+
+    /// <summary>The local player's commander profile (perks are chosen here); null to hide the commander panel.</summary>
+    public CommanderProfile? Commander { get; }
+
+    /// <summary>The panel beside the map.</summary>
+    public CampaignView View { get; set; } = CampaignView.Mission;
+
+    /// <summary>The region or event first shown (kept when the screen is rebuilt after research).</summary>
+    public CampaignTarget? Initial
+    {
+        init
+        {
+            if (value is { } target
+                && (_campaign.CanTarget(target, out _) || (!target.IsEvent && target.Id >= 0 && target.Id < _campaign.World.Regions.Count)))
+            {
+                _selected = target;
+            }
+        }
+    }
+
+    /// <summary>The mission as it would be planned now: every seat, the local commander's perks on seat 0.</summary>
+    public CampaignMission? PlannedMission =>
+        _selected is { } target && _campaign.CanTarget(target, out _)
+            ? _campaign.PlanMission(target, _difficulty, 1 + Allies, Commander is null ? null : [Commander.Bonus()])
+            : null;
 
     public CampaignState Campaign => _campaign;
 
@@ -294,7 +336,7 @@ public sealed class CampaignScreen
         var scale = Scale;
         canvas.Rect(0, 0, _framebuffer.X - PanelWidth, 48 * scale, Palette.Panel);
         var title = string.Create(CultureInfo.InvariantCulture,
-            $"CAMPAIGN {_campaign.Code}  TURN {_campaign.Turn}  {_campaign.World.Regions.Count(r => _campaign.IsLiberated(r.Id))}/{_campaign.World.Regions.Count} LIBERATED  {_campaign.HivesLeft} HIVE{(_campaign.HivesLeft == 1 ? string.Empty : "S")} LEFT");
+            $"{_campaign.Code}  TURN {_campaign.Turn}  {_campaign.World.Regions.Count(r => _campaign.IsLiberated(r.Id))}/{_campaign.World.Regions.Count} LIBERATED  {_campaign.HivesLeft} HIVE{(_campaign.HivesLeft == 1 ? string.Empty : "S")}  {_campaign.Samples} SAMPLES");
         canvas.Text(12 * scale, 8 * scale, title, 2 * scale, Palette.Text);
 
         // The global infestation meter.
@@ -378,83 +420,179 @@ public sealed class CampaignScreen
             y += 4 * scale;
         }
 
+        void ResearchView()
+        {
+            Label(string.Create(CultureInfo.InvariantCulture, $"RESEARCH - {_campaign.Samples} SAMPLES"), 2 * scale, Palette.Credits);
+            Paragraph("Shared by the whole team, for every mission after it. Samples come from destroyed nests, victories and rescued survivors.", Palette.TextDim, 3);
+            foreach (var node in _campaign.Rules.Research)
+            {
+                var id = node.Id;
+                var done = _campaign.IsResearched(id);
+                var available = _campaign.CanResearch(id, out var why);
+                var text = done ? node.Name.ToUpperInvariant() + " - DONE" : string.Create(CultureInfo.InvariantCulture, $"{node.Name.ToUpperInvariant()} - {node.Cost}");
+                _widgets.Add(new Widget(left, y, width, 22 * scale, text,
+                    () => Choice = new CampaignChoice(CampaignChoiceKind.Research, _selected ?? default, _difficulty) { Research = id }, available)
+                {
+                    Selected = done,
+                    Hint = node.Description + (done || available ? string.Empty : " (" + why + ")"),
+                });
+                y += 25 * scale;
+            }
+        }
+
+        void CommanderView(CommanderProfile profile)
+        {
+            var commander = profile.Active;
+            var gap = 6 * scale;
+            var each = (width - (gap * (Commanders.All.Count - 1))) / Commanders.All.Count;
+            for (var i = 0; i < Commanders.All.Count; i++)
+            {
+                var option = Commanders.All[i];
+                _widgets.Add(new Widget(left + (i * (each + gap)), y, each, 24 * scale, option.Name.Split(' ')[^1].ToUpperInvariant(), () => profile.Lead(option), true)
+                {
+                    Selected = option == commander,
+                    Hint = string.Create(CultureInfo.InvariantCulture, $"{option.Name}: {option.Title}. Level {profile.LevelOf(option)}."),
+                });
+            }
+
+            y += 32 * scale;
+            var level = profile.LevelOf(commander);
+            var next = Commanders.NextThreshold(level);
+            Label(commander.Name.ToUpperInvariant(), 2.5f * scale, Palette.Text, 8 * scale);
+            Paragraph(commander.Title, Palette.TextDim, 2);
+            Paragraph(string.Create(CultureInfo.InvariantCulture,
+                $"Level {level}, {profile.ExperienceOf(commander)} experience{(next is { } n ? $", {n} for level {level + 1}" : ", the highest level")}. Up to {Commanders.MaxActivePerks} perks at once; yours only, in every campaign you play."), Palette.TextDim, 4);
+            foreach (var perk in commander.Perks)
+            {
+                var unlocked = perk.Level <= level;
+                var active = profile.IsActive(perk);
+                var text = unlocked ? perk.Name.ToUpperInvariant() + (active ? " - ON" : string.Empty) : string.Create(CultureInfo.InvariantCulture, $"{perk.Name.ToUpperInvariant()} - LEVEL {perk.Level}");
+                _widgets.Add(new Widget(left, y, width, 22 * scale, text, () => profile.Toggle(perk), unlocked && _campaign.Outcome == CampaignOutcome.InProgress)
+                {
+                    Selected = active,
+                    Hint = perk.Description,
+                });
+                y += 25 * scale;
+            }
+        }
+
         if (!string.IsNullOrEmpty(Message))
         {
             Paragraph(Message, Palette.TextWarn);
         }
 
-        // The selected region or event, and the mission it would be.
-        if (_selected is { } target)
+        // Tabs: the mission on the selected ground, the team's research, the player's commander.
         {
-            var campaignEvent = target.IsEvent ? _campaign.FindEvent(target.Id) : null;
-            var region = _campaign.World.Regions[campaignEvent?.Region ?? target.Id];
-            if (campaignEvent is not null)
+            var tabs = Commander is null ? new[] { CampaignView.Mission, CampaignView.Research } : new[] { CampaignView.Mission, CampaignView.Research, CampaignView.Commander };
+            var gap = 6 * scale;
+            var each = (width - (gap * (tabs.Length - 1))) / tabs.Length;
+            for (var i = 0; i < tabs.Length; i++)
             {
-                Label(CampaignState.EventName(campaignEvent.Kind).ToUpperInvariant(), 2 * scale, Palette.Credits);
+                var view = tabs[i];
+                _widgets.Add(new Widget(left + (i * (each + gap)), y, each, 24 * scale, view.ToString().ToUpperInvariant(), () => View = view, true) { Selected = View == view });
             }
 
-            Label(region.Name.ToUpperInvariant(), 2.5f * scale, Palette.Text, 8 * scale);
-            var owner = _campaign.OwnerOf(region.Id) switch
-            {
-                RegionOwner.Liberated => "LIBERATED",
-                RegionOwner.Maw => string.Create(CultureInfo.InvariantCulture, $"HELD BY THE MAW, INFESTATION {_campaign.InfestationOf(region.Id)}"),
-                _ => string.Create(CultureInfo.InvariantCulture, $"CONTESTED, INFESTATION {_campaign.InfestationOf(region.Id)}"),
-            };
-            Paragraph(string.Create(CultureInfo.InvariantCulture,
-                $"{_campaign.World.Theatres[region.Theatre].Name}. {owner}{(_campaign.IsHive(region.Id) ? ". HIVE" : string.Empty)}{(region.IsHome ? ". HOME" : string.Empty)}."), Palette.TextDim);
-            Paragraph(string.Create(CultureInfo.InvariantCulture,
-                $"{CampaignState.Words(region.Terrain.ToString())}, {region.Biome}, richness {region.Richness}{(region.Features == RegionFeatures.None ? string.Empty : ". " + CampaignState.Words(region.Features.ToString()))}."), Palette.TextDim);
-            if (campaignEvent is not null)
-            {
-                var turns = campaignEvent.ExpiresAfterTurn - _campaign.Turn;
-                Paragraph(string.Create(CultureInfo.InvariantCulture, $"{turns} TURN{(turns == 1 ? string.Empty : "S")} TO RESPOND. IGNORED: {Consequence(campaignEvent.Kind)}"), Palette.TextWarn);
-            }
+            y += 32 * scale;
+        }
 
-            if (_campaign.CanTarget(target, out var reason))
-            {
-                var mission = _campaign.PlanMission(target, _difficulty);
-                Paragraph("MISSION: " + mission.Briefing, Palette.Text);
-                Paragraph(string.Create(CultureInfo.InvariantCulture,
-                    $"YOU AND {Allies} AI ALL{(Allies == 1 ? "Y" : "IES")}. A WIN LIBERATES; A LOSS RAISES THE INFESTATION. EITHER WAY THE MAW THEN MOVES."), Palette.TextDim);
-                _widgets.Add(new Widget(left, y, width, 34 * scale, "LAUNCH MISSION", () => Choice = new CampaignChoice(CampaignChoiceKind.Launch, target, _difficulty), true) { Primary = true });
-                y += 44 * scale;
-            }
-            else
-            {
-                Paragraph(reason == "the region does not border liberated territory" ? "NOT ON THE FRONT: LIBERATE A NEIGHBOURING REGION FIRST." : reason.ToUpperInvariant() + ".", Palette.TextDim);
-            }
+        if (View == CampaignView.Research)
+        {
+            ResearchView();
+        }
+        else if (View == CampaignView.Commander && Commander is { } profile)
+        {
+            CommanderView(profile);
         }
         else
         {
-            Paragraph("SELECT A REGION ON THE MAP.", Palette.TextDim);
-        }
-
-        // Events waiting for an answer.
-        if (_campaign.Events.Count > 0)
-        {
-            y += 4 * scale;
-            Label("EVENTS", 2 * scale, Palette.Credits);
-            foreach (var campaignEvent in _campaign.Events)
+            // The selected region or event, and the mission it would be.
+            if (_selected is { } target)
             {
-                var id = campaignEvent.Id;
-                var turns = campaignEvent.ExpiresAfterTurn - _campaign.Turn;
-                var text = string.Create(CultureInfo.InvariantCulture,
-                    $"{CampaignState.EventName(campaignEvent.Kind).ToUpperInvariant()} - {_campaign.World.Regions[campaignEvent.Region].Name.ToUpperInvariant()} ({turns})");
-                _widgets.Add(new Widget(left, y, width, 24 * scale, text, () => _selected = CampaignTarget.Event(id), true)
+                var campaignEvent = target.IsEvent ? _campaign.FindEvent(target.Id) : null;
+                var region = _campaign.World.Regions[campaignEvent?.Region ?? target.Id];
+                if (campaignEvent is not null)
                 {
-                    Selected = _selected is { IsEvent: true } chosen && chosen.Id == id,
-                });
-                y += 28 * scale;
+                    Label(CampaignState.EventName(campaignEvent.Kind).ToUpperInvariant(), 2 * scale, Palette.Credits);
+                }
+
+                Label(region.Name.ToUpperInvariant(), 2.5f * scale, Palette.Text, 8 * scale);
+                var owner = _campaign.OwnerOf(region.Id) switch
+                {
+                    RegionOwner.Liberated => "LIBERATED",
+                    RegionOwner.Maw => string.Create(CultureInfo.InvariantCulture, $"HELD BY THE MAW, INFESTATION {_campaign.InfestationOf(region.Id)}"),
+                    _ => string.Create(CultureInfo.InvariantCulture, $"CONTESTED, INFESTATION {_campaign.InfestationOf(region.Id)}"),
+                };
+                Paragraph(string.Create(CultureInfo.InvariantCulture,
+                    $"{_campaign.World.Theatres[region.Theatre].Name}. {owner}{(_campaign.IsHive(region.Id) ? ". HIVE" : string.Empty)}{(region.IsHome ? ". HOME" : string.Empty)}."), Palette.TextDim);
+                Paragraph(string.Create(CultureInfo.InvariantCulture,
+                    $"{CampaignState.Words(region.Terrain.ToString())}, {region.Biome}, richness {region.Richness}{(region.Features == RegionFeatures.None ? string.Empty : ". " + CampaignState.Words(region.Features.ToString()))}."), Palette.TextDim);
+                if (campaignEvent is not null)
+                {
+                    var turns = campaignEvent.ExpiresAfterTurn - _campaign.Turn;
+                    Paragraph(string.Create(CultureInfo.InvariantCulture, $"{turns} TURN{(turns == 1 ? string.Empty : "S")} TO RESPOND. IGNORED: {Consequence(campaignEvent.Kind)}"), Palette.TextWarn);
+                }
+
+                if (_campaign.CanTarget(target, out var reason))
+                {
+                    var mission = PlannedMission!;
+                    Paragraph("MISSION: " + mission.Briefing, Palette.Text);
+                    Paragraph(string.Create(CultureInfo.InvariantCulture,
+                        $"YOU AND {Allies} AI ALL{(Allies == 1 ? "Y" : "IES")}. A WIN LIBERATES; A LOSS RAISES THE INFESTATION. EITHER WAY THE MAW THEN MOVES."), Palette.TextDim);
+                    var yours = mission.Loadouts[0];
+                    Paragraph("YOUR DETACHMENT: " + (yours.Units.Count == 0 ? "NONE YET (SURVIVORS OF A MISSION JOIN IT)" : Describe(yours.Units)) + ".", Palette.TextDim, 3);
+                    if (Bonuses(yours, mission) is { Length: > 0 } bonuses)
+                    {
+                        Paragraph("BONUSES: " + bonuses + ".", Palette.TextGood, 3);
+                    }
+
+                    _widgets.Add(new Widget(left, y, width, 34 * scale, "LAUNCH MISSION", () => Choice = new CampaignChoice(CampaignChoiceKind.Launch, target, _difficulty), true) { Primary = true });
+                    y += 44 * scale;
+                }
+                else
+                {
+                    Paragraph(reason == "the region does not border liberated territory" ? "NOT ON THE FRONT: LIBERATE A NEIGHBOURING REGION FIRST." : reason.ToUpperInvariant() + ".", Palette.TextDim);
+                }
+            }
+            else
+            {
+                Paragraph("SELECT A REGION ON THE MAP.", Palette.TextDim);
+            }
+
+            // Events waiting for an answer.
+            if (_campaign.Events.Count > 0)
+            {
+                y += 4 * scale;
+                Label("EVENTS", 2 * scale, Palette.Credits);
+                foreach (var campaignEvent in _campaign.Events)
+                {
+                    var id = campaignEvent.Id;
+                    var turns = campaignEvent.ExpiresAfterTurn - _campaign.Turn;
+                    var text = string.Create(CultureInfo.InvariantCulture,
+                        $"{CampaignState.EventName(campaignEvent.Kind).ToUpperInvariant()} - {_campaign.World.Regions[campaignEvent.Region].Name.ToUpperInvariant()} ({turns})");
+                    _widgets.Add(new Widget(left, y, width, 24 * scale, text, () => _selected = CampaignTarget.Event(id), true)
+                    {
+                        Selected = _selected is { IsEvent: true } chosen && chosen.Id == id,
+                    });
+                    y += 28 * scale;
+                }
+            }
+
+            // What the last turn did.
+            if (LastTurn is { } report && report.Lines.Count > 0)
+            {
+                y += 4 * scale;
+                Label(string.Create(CultureInfo.InvariantCulture, $"TURN {report.Turn}: {(report.Won ? "VICTORY" : "DEFEAT")}"), 2 * scale, report.Won ? Palette.TextGood : Palette.TextWarn);
+                var room = Math.Max(2, (int)((_framebuffer.Y - (110 * scale) - y) / line));
+                Paragraph(string.Join(" ", report.Lines), Palette.TextDim, room);
             }
         }
 
-        // What the last turn did.
-        if (LastTurn is { } report && report.Lines.Count > 0)
+        // What the hovered button does.
+        _hint = _widgets.FirstOrDefault(w => w.Hint is not null && w.Contains(_mouse))?.Hint;
+        if (_hint is not null)
         {
-            y += 4 * scale;
-            Label(string.Create(CultureInfo.InvariantCulture, $"TURN {report.Turn}: {(report.Won ? "VICTORY" : "DEFEAT")}"), 2 * scale, report.Won ? Palette.TextGood : Palette.TextWarn);
-            var room = Math.Max(2, (int)((_framebuffer.Y - (110 * scale) - y) / line));
-            Paragraph(string.Join(" ", report.Lines), Palette.TextDim, room);
+            y = Math.Max(y, _framebuffer.Y - (140 * scale));
+            Paragraph(_hint, Palette.Text, 4);
         }
 
         // Bottom: lower the difficulty (never raise it) and leave.
@@ -505,8 +643,57 @@ public sealed class CampaignScreen
         }
     }
 
+    // "2 WARDEN LIGHT TANK, 1 ROCKETEER" from unit ids.
+    private static string Describe(IReadOnlyList<string> units) =>
+        string.Join(", ", units.GroupBy(id => id, StringComparer.Ordinal)
+            .Select(group => string.Create(CultureInfo.InvariantCulture, $"{group.Count()} {Ashfall.Content.GameContent.Standard.Unit(Ashfall.Content.GameContent.Standard.UnitIndex(group.Key)).Name.ToUpperInvariant()}")));
+
+    // What research and perks add, in words.
+    private static string Bonuses(Ashfall.Simulation.Players.PlayerLoadout loadout, CampaignMission mission)
+    {
+        var parts = new List<string>();
+        var m = loadout.Modifiers;
+        void Percent(int value, string what)
+        {
+            if (value != 100)
+            {
+                parts.Add(string.Create(CultureInfo.InvariantCulture, $"{(value > 100 ? "+" : string.Empty)}{value - 100}% {what}"));
+            }
+        }
+
+        Percent(m.DamagePercent, "DAMAGE");
+        Percent(m.UnitHealthPercent, "UNIT ARMOUR");
+        Percent(m.StructureHealthPercent, "STRUCTURE ARMOUR");
+        Percent(m.HarvesterHealthPercent, "HARVESTER ARMOUR");
+        Percent(m.RepairCostPercent, "REPAIR COST");
+        if (loadout.Credits > 0)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"+{loadout.Credits} CREDITS"));
+        }
+
+        if (loadout.Harvesters > 0)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"+{loadout.Harvesters} HARVESTER{(loadout.Harvesters == 1 ? string.Empty : "S")}"));
+        }
+
+        if (mission.RevealNests)
+        {
+            parts.Add("NESTS REVEALED");
+        }
+
+        if (mission.TelegraphBonusTicks > 0)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"+{mission.TelegraphBonusTicks / 15}S WARNING"));
+        }
+
+        return string.Join(", ", parts);
+    }
+
     private sealed record Widget(float X, float Y, float W, float H, string Text, Action? Click, bool Enabled)
     {
+        /// <summary>A line explaining the button, shown while the mouse is over it.</summary>
+        public string? Hint { get; init; }
+
         public bool Primary { get; init; }
 
         public bool Selected { get; init; }

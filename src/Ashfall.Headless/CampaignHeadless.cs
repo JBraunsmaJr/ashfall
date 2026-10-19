@@ -8,7 +8,7 @@ namespace Ashfall.Headless;
 
 /// <summary>
 /// <c>--mode campaign</c>: plays campaign missions as real Purges with scripted AIs on every seat, the autopilot choosing
-/// each turn's target, and saves after every turn. Proves the whole loop (region to match to result to world) end to end
+/// each turn's target and spending samples on research, and saves after every turn. Proves the whole loop (region to match to result to world) end to end
 /// without a window.
 /// </summary>
 internal static class CampaignHeadless
@@ -44,13 +44,20 @@ internal static class CampaignHeadless
         while (campaign.Outcome == CampaignOutcome.InProgress && (options.Missions is not { } limit || played < limit))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var researched = campaign.ResearchLog.Count;
+            CampaignAutopilot.BuyResearch(campaign);
+            foreach (var (_, id) in campaign.ResearchLog.Skip(researched))
+            {
+                Console.WriteLine($"research: {campaign.Rules.FindResearch(id)!.Name}");
+            }
+
             var target = CampaignAutopilot.ChooseTarget(campaign);
             var turn = await CampaignRunner.PlayTurnAsync(campaign, target, players, options.Ticks, cancellationToken: cancellationToken).ConfigureAwait(false);
             played++;
             var mission = turn.Mission;
             var region = campaign.World.Regions[mission.Region];
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                $"turn {campaign.Turn}: {mission.Kind} {region.Name} ({mission.Nests} tier-{mission.NestTier} nests, {mission.Map.ToCode()}) -> {(turn.Result.Won ? "won" : "lost")} in {turn.Result.Ticks / 900.0:F1} min, {turn.Result.NestsDestroyed} destroyed, {turn.Result.NestsStanding} standing; meter {campaign.Meter}%, {campaign.HivesLeft} hives left"));
+                $"turn {campaign.Turn}: {mission.Kind} {region.Name} ({mission.Nests} tier-{mission.NestTier} nests, {mission.Map.ToCode()}) -> {(turn.Result.Won ? "won" : "lost")} in {turn.Result.Ticks / 900.0:F1} min, {turn.Result.NestsDestroyed} destroyed, {turn.Result.NestsStanding} standing, {turn.Result.Samples} samples; meter {campaign.Meter}%, {campaign.HivesLeft} hives left"));
             foreach (var line in turn.Report.Lines)
             {
                 Console.WriteLine("  " + line);

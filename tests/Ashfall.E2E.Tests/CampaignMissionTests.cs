@@ -23,8 +23,8 @@ public class CampaignMissionTests
             campaign.Play(new TurnRecord(CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty, MissionResult.Victory(2)));
         }
 
-        var mission = campaign.Targets.Where(t => !t.IsEvent).Select(campaign.PlanMission).MaxBy(m => (m.NestTier, m.BonusCredits))!;
-        var spec = CampaignMatches.ToMatchSpec(mission, players: 2);
+        var mission = campaign.Targets.Where(t => !t.IsEvent).Select(t => campaign.PlanMission(t, campaign.Difficulty, seats: 2)).MaxBy(m => (m.NestTier, m.BonusCredits))!;
+        var spec = CampaignMatches.ToMatchSpec(mission);
         Assert.Equal(MatchMode.Purge, spec.Mode);
         Assert.Equal(mission.Seed, spec.Seed);
         Assert.Equal(mission.Map, spec.GeneratedMap);
@@ -64,7 +64,7 @@ public class CampaignMissionTests
         var campaign = CampaignState.Start(8, CampaignRuleSets.Quick, MawDifficulty.Recruit);
         var target = CampaignAutopilot.ChooseTarget(campaign);
         var mission = campaign.PlanMission(target);
-        await using var match = await HeadlessMatch.StartAsync(CampaignMatches.ToMatchSpec(mission, players: 1), GameSpeed.Unthrottled);
+        await using var match = await HeadlessMatch.StartAsync(CampaignMatches.ToMatchSpec(mission), GameSpeed.Unthrottled);
         var world = match.Simulation.World;
         foreach (var index in world.Store<Nest>().EntityIndices.ToArray())
         {
@@ -87,7 +87,13 @@ public class CampaignMissionTests
     public void Campaign_settings_travel_in_replays_and_old_replays_read_without_them()
     {
         var campaign = CampaignState.Start(2, CampaignRuleSets.Standard, MawDifficulty.Elite);
-        var spec = CampaignMatches.ToMatchSpec(campaign.PlanMission(campaign.Targets[0]), players: 3) with { NestTier = 2, BonusCredits = 1_500, BonusHarvesters = 1 };
+        var spec = CampaignMatches.ToMatchSpec(campaign.PlanMission(campaign.Targets[0], campaign.Difficulty, seats: 3)) with
+        {
+            NestTier = 2,
+            BonusCredits = 1_500,
+            BonusHarvesters = 1,
+            Loadouts = [],
+        };
         var writer = new PacketWriter();
         MatchSpecCodec.Write(writer, spec);
         var read = MatchSpecCodec.Read(new PacketReader(writer.ToArray()));
@@ -96,9 +102,9 @@ public class CampaignMissionTests
         Assert.Equal(1, read.BonusHarvesters);
         Assert.Equal(spec.GeneratedMap, read.GeneratedMap);
 
-        // Format 5 stopped after the difficulty: tier 1 nests, no bonuses.
+        // Format 5 stopped after the difficulty: tier 1 nests, no bonuses (format 6 added 6 bytes, format 7 another 9 here).
         var bytes = writer.ToArray();
-        var old = MatchSpecCodec.Read(new PacketReader(bytes.AsSpan(0, bytes.Length - 6).ToArray()), formatVersion: 5);
+        var old = MatchSpecCodec.Read(new PacketReader(bytes.AsSpan(0, bytes.Length - 15).ToArray()), formatVersion: 5);
         Assert.Equal(1, old.NestTier);
         Assert.Equal(0, old.BonusCredits);
         Assert.Equal(0, old.BonusHarvesters);
@@ -164,6 +170,67 @@ public class CampaignMissionTests
     }
 
     [Fact]
+    public async Task Loadouts_bring_research_perks_and_detachments_into_the_match_and_survivors_come_back()
+    {
+        var campaign = CampaignState.Start(4, CampaignRuleSets.Quick, MawDifficulty.Recruit);
+        campaign.Play(new TurnRecord(CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty,
+            new MissionResult(true, 2, 0, 20_000, 150, [["bulwark.warden", "bulwark.rocketeer"], ["bulwark.rifleman"]])));
+        foreach (var id in new[] { "armour-1", "fortify-1", "intel-1", "intel-2", "weapons-1" })
+        {
+            campaign.Research(id);
+        }
+
+        var perks = new CommanderBonus(new Ashfall.Simulation.Players.PlayerModifiers(DamagePercent: 105), 250, 1, 1);
+        var mission = campaign.PlanMission(CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty, seats: 2, commanders: [perks]);
+        var spec = CampaignMatches.ToMatchSpec(mission);
+        Assert.Equal(2, spec.Players);
+        Assert.True(spec.RevealNests);
+        Assert.Equal(75, spec.TelegraphBonusTicks);
+
+        var writer = new PacketWriter();
+        MatchSpecCodec.Write(writer, spec);
+        var read = MatchSpecCodec.Read(new PacketReader(writer.ToArray()));
+        Assert.Equal(spec.Loadouts, read.Loadouts);
+        Assert.Equal((spec.RevealNests, spec.TelegraphBonusTicks), (read.RevealNests, read.TelegraphBonusTicks));
+
+        await using var match = await HeadlessMatch.StartAsync(spec, GameSpeed.Unthrottled);
+        var simulation = match.Simulation;
+        var world = simulation.World;
+        var content = simulation.Content;
+        Assert.Equal(115, simulation.Players[0].Modifiers.DamagePercent);
+        Assert.Equal(110, simulation.Players[1].Modifiers.DamagePercent);
+        Assert.Equal(content.Economy.StartingCredits + mission.BonusCredits + 250, simulation.Players[0].Credits);
+        Assert.Equal(DirectorProfile.For(MawDifficulty.Recruit).TelegraphTicks + 75, simulation.Maw!.Director!.Profile.TelegraphTicks);
+
+        // The detachments landed, ten percent tougher; the yards are twenty percent tougher.
+        int Count(int player, string id) => world.Store<UnitInfo>().EntityIndices.ToArray()
+            .Count(index => world.Store<Owner>().Get(index).PlayerId == player && world.Store<UnitInfo>().Get(index).UnitType == content.UnitIndex(id));
+        Assert.Equal(1, Count(0, BulwarkContent.Warden));
+        Assert.Equal(1, Count(0, BulwarkContent.Rocketeer));
+        Assert.Equal(1, Count(1, BulwarkContent.Rifleman));
+        Assert.Equal(1 + mission.BonusHarvesters, Count(0, BulwarkContent.Harvester));
+        var warden = world.Store<UnitInfo>().EntityIndices.ToArray().First(index => world.Store<UnitInfo>().Get(index).UnitType == content.UnitIndex(BulwarkContent.Warden));
+        Assert.Equal(content.Unit(content.UnitIndex(BulwarkContent.Warden)).Health * 110 / 100, world.Store<Health>().Get(warden).Max);
+        var yard = world.Store<StructureInfo>().EntityIndices.ToArray().First(index => world.Store<Owner>().Get(index).PlayerId == 0);
+        Assert.Equal(content.Structure(content.StructureIndex(BulwarkContent.ConstructionYard)).Health * 120 / 100, world.Store<Health>().Get(yard).Max);
+
+        // Seismic mapping: every nest is explored by both players from the start.
+        await match.RunTicksAsync(2, TestContext.Current.CancellationToken);
+        foreach (var index in world.Store<Nest>().EntityIndices)
+        {
+            var origin = world.Store<StructureInfo>().Get(index).Origin;
+            Assert.True(simulation.Visibility.IsExplored(0, new Ashfall.Simulation.Map.Cell(origin.X + 1, origin.Y + 1)));
+            Assert.True(simulation.Visibility.IsExplored(1, new Ashfall.Simulation.Map.Cell(origin.X + 1, origin.Y + 1)));
+        }
+
+        // Survivors: armed, non-harvester units, the most valuable first, as many as each seat may keep.
+        var result = CampaignMatches.ResultOf(match, mission, campaign.Rules);
+        Assert.Equal([BulwarkContent.Warden, BulwarkContent.Rocketeer], result.Survivors![0]);
+        Assert.Equal([BulwarkContent.Rifleman], result.Survivors[1]);
+        Assert.Equal(campaign.Rules.SamplesFor(false, 0, mission.NestTier), result.Samples);
+    }
+
+    [Fact]
     public void Every_first_turn_mission_of_many_campaigns_builds_a_valid_match()
     {
         for (uint seed = 1; seed <= 12; seed++)
@@ -171,7 +238,7 @@ public class CampaignMissionTests
             var campaign = CampaignState.Start(seed, CampaignRuleSets.Standard, MawDifficulty.Veteran);
             foreach (var target in campaign.Targets)
             {
-                var spec = CampaignMatches.ToMatchSpec(campaign.PlanMission(target), players: 2);
+                var spec = CampaignMatches.ToMatchSpec(campaign.PlanMission(target, campaign.Difficulty, seats: 2));
                 spec.Validate();
             }
         }

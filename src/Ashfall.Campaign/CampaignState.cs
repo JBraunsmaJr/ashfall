@@ -2,6 +2,7 @@
 using Ashfall.Core;
 using Ashfall.MapGen;
 using Ashfall.Simulation.Horde;
+using Ashfall.Simulation.Players;
 
 namespace Ashfall.Campaign;
 
@@ -29,6 +30,8 @@ public sealed class CampaignState
     private readonly int[] _attempts;
     private readonly List<CampaignEvent> _events = [];
     private readonly List<TurnRecord> _history = [];
+    private readonly List<(int AfterTurn, string Id)> _research = [];
+    private readonly List<string>[] _detachments = [[], [], [], []];
     private int _nextEventId = 1;
 
     private CampaignState(CampaignCode code)
@@ -82,6 +85,105 @@ public sealed class CampaignState
     public IReadOnlyList<CampaignEvent> Events => _events;
 
     public IReadOnlyList<TurnRecord> History => _history;
+
+    /// <summary>Most seats a campaign mission has (GDD: 1–4 players).</summary>
+    public const int MaxSeats = 4;
+
+    /// <summary>Samples in hand for research (GDD section 2): earned in missions, shared by the team.</summary>
+    public int Samples { get; private set; }
+
+    /// <summary>Research projects done, each with the number of turns played when it was bought, in order.</summary>
+    public IReadOnlyList<(int AfterTurn, string Id)> ResearchLog => _research;
+
+    public bool IsResearched(string id) => _research.Exists(entry => entry.Id == id);
+
+    /// <summary>The units seat <paramref name="seat"/> kept from its last mission and lands with next time.</summary>
+    public IReadOnlyList<string> DetachmentOf(int seat) => seat >= 0 && seat < MaxSeats ? _detachments[seat] : [];
+
+    /// <summary>Whether the team can research <paramref name="id"/> now, and if not, why.</summary>
+    public bool CanResearch(string id, out string reason)
+    {
+        reason = string.Empty;
+        var node = Rules.FindResearch(id);
+        if (node is null)
+        {
+            reason = "no such project";
+        }
+        else if (Outcome != CampaignOutcome.InProgress)
+        {
+            reason = "the campaign is over";
+        }
+        else if (IsResearched(id))
+        {
+            reason = "already researched";
+        }
+        else if (node.Requires is { } requires && !IsResearched(requires))
+        {
+            reason = "needs " + (Rules.FindResearch(requires)?.Name ?? requires) + " first";
+        }
+        else if (Samples < node.Cost)
+        {
+            reason = string.Create(CultureInfo.InvariantCulture, $"needs {node.Cost} samples");
+        }
+
+        return reason.Length == 0;
+    }
+
+    /// <summary>Spends samples on a research project, for the whole team, from the next mission on.</summary>
+    public void Research(string id)
+    {
+        if (!CanResearch(id, out var reason))
+        {
+            throw new InvalidOperationException($"Cannot research {id}: {reason}.");
+        }
+
+        Samples -= Rules.FindResearch(id)!.Cost;
+        _research.Add((Turn, id));
+    }
+
+    /// <summary>What finished research gives every player in every mission.</summary>
+    public (PlayerModifiers Modifiers, int Credits, int Harvesters, bool RevealNests, int TelegraphBonusTicks) ResearchBonus()
+    {
+        var modifiers = PlayerModifiers.None;
+        int credits = 0, harvesters = 0, telegraph = 0;
+        var reveal = false;
+        foreach (var (_, id) in _research)
+        {
+            var node = Rules.FindResearch(id)!;
+            switch (node.Effect)
+            {
+                case ResearchEffect.Damage:
+                    modifiers = modifiers with { DamagePercent = modifiers.DamagePercent + node.Amount };
+                    break;
+                case ResearchEffect.UnitHealth:
+                    modifiers = modifiers with { UnitHealthPercent = modifiers.UnitHealthPercent + node.Amount };
+                    break;
+                case ResearchEffect.StructureHealth:
+                    modifiers = modifiers with { StructureHealthPercent = modifiers.StructureHealthPercent + node.Amount };
+                    break;
+                case ResearchEffect.HarvesterHealth:
+                    modifiers = modifiers with { HarvesterHealthPercent = modifiers.HarvesterHealthPercent + node.Amount };
+                    break;
+                case ResearchEffect.RepairCost:
+                    modifiers = modifiers with { RepairCostPercent = modifiers.RepairCostPercent - node.Amount };
+                    break;
+                case ResearchEffect.Credits:
+                    credits += node.Amount;
+                    break;
+                case ResearchEffect.Harvesters:
+                    harvesters += node.Amount;
+                    break;
+                case ResearchEffect.RevealNests:
+                    reveal = true;
+                    break;
+                case ResearchEffect.Telegraph:
+                    telegraph += node.Amount;
+                    break;
+            }
+        }
+
+        return (modifiers, credits, harvesters, reveal, telegraph);
+    }
 
     /// <summary>Hives still standing.</summary>
     public int HivesLeft => _hive.Count(hive => hive);
@@ -175,12 +277,17 @@ public sealed class CampaignState
         return true;
     }
 
-    /// <summary>The mission the team would play for <paramref name="target"/> this turn, on the current difficulty.</summary>
+    /// <summary>The mission the team would play for <paramref name="target"/> this turn, on the current difficulty, one seat.</summary>
     public CampaignMission PlanMission(CampaignTarget target) => PlanMission(target, Difficulty);
 
-    /// <summary>The mission for <paramref name="target"/> on <paramref name="difficulty"/> (no higher than the campaign's).</summary>
-    public CampaignMission PlanMission(CampaignTarget target, MawDifficulty difficulty)
+    /// <summary>
+    /// The mission for <paramref name="target"/> on <paramref name="difficulty"/> (no higher than the campaign's) for
+    /// <paramref name="seats"/> players, each with their commander's bonuses (seat order; missing or null for none).
+    /// </summary>
+    public CampaignMission PlanMission(CampaignTarget target, MawDifficulty difficulty, int seats = 1, IReadOnlyList<CommanderBonus?>? commanders = null)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(seats, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(seats, MaxSeats);
         if (!CanTarget(target, out var reason))
         {
             throw new InvalidOperationException($"Cannot plan a mission for {target}: {reason}.");
@@ -257,6 +364,23 @@ public sealed class CampaignState
         var credits = (liberatedNeighbours * Rules.CreditsPerLiberatedNeighbour) + (survivorNeighbours * Rules.CreditsPerSurvivorNeighbour);
         var harvesters = liberatedNeighbours / Rules.NeighboursPerHarvester;
         harvesters = harvesters > Rules.MaxBonusHarvesters ? Rules.MaxBonusHarvesters : harvesters;
+
+        // Every seat: the team's research, its commander's perks and its own detachment.
+        var research = ResearchBonus();
+        var loadouts = new PlayerLoadout[seats];
+        var detachmentSizes = new int[seats];
+        for (var seat = 0; seat < seats; seat++)
+        {
+            var commander = commanders is not null && seat < commanders.Count && commanders[seat] is { } bonus ? bonus : CommanderBonus.None;
+            detachmentSizes[seat] = Rules.DetachmentSize + commander.DetachmentSlots;
+            var detachment = _detachments[seat].Take(detachmentSizes[seat]).ToArray();
+            loadouts[seat] = new PlayerLoadout(
+                research.Modifiers.Plus(commander.Modifiers),
+                research.Credits + commander.Credits,
+                research.Harvesters + commander.Harvesters > 4 ? 4 : research.Harvesters + commander.Harvesters,
+                detachment);
+        }
+
         return new CampaignMission
         {
             Target = target,
@@ -272,6 +396,10 @@ public sealed class CampaignState
             Difficulty = difficulty < Difficulty ? difficulty : Difficulty,
             BonusCredits = credits,
             BonusHarvesters = harvesters,
+            Loadouts = loadouts,
+            DetachmentSizes = detachmentSizes,
+            RevealNests = research.RevealNests,
+            TelegraphBonusTicks = research.TelegraphBonusTicks,
             Briefing = Briefing(region, campaignEvent, kind, level, nests, tier, credits, harvesters, liberatedNeighbours),
         };
     }
@@ -300,6 +428,22 @@ public sealed class CampaignState
         var standing = new List<int>();
 
         ApplyResult(record, report, standing);
+        Samples += record.Result.Samples;
+        if (record.Result.Samples > 0)
+        {
+            report.Add(string.Create(CultureInfo.InvariantCulture, $"{record.Result.Samples} samples recovered for research."));
+        }
+
+        // Survivors become the next detachments; units lost are gone.
+        if (record.Result.Survivors is { } survivors)
+        {
+            for (var seat = 0; seat < survivors.Count && seat < MaxSeats; seat++)
+            {
+                _detachments[seat].Clear();
+                _detachments[seat].AddRange(survivors[seat].Take(PlayerLoadout.MaxUnits));
+            }
+        }
+
         if (HivesLeft == 0)
         {
             Finish(record, report);
@@ -326,6 +470,22 @@ public sealed class CampaignState
         hasher.Add(Meter);
         hasher.Add(SurvivorsRescued);
         hasher.Add(RewardsLost);
+        hasher.Add(Samples);
+        hasher.Add(_research.Count);
+        foreach (var (afterTurn, id) in _research)
+        {
+            hasher.Add(afterTurn);
+            hasher.Add(id);
+        }
+
+        foreach (var detachment in _detachments)
+        {
+            hasher.Add(detachment.Count);
+            foreach (var unit in detachment)
+            {
+                hasher.Add(unit);
+            }
+        }
         for (var region = 0; region < _infestation.Length; region++)
         {
             hasher.Add(_infestation[region]);
@@ -404,7 +564,8 @@ public sealed class CampaignState
             if (World.Regions[region].Has(RegionFeatures.Survivors))
             {
                 SurvivorsRescued++;
-                report.Add($"Survivors in {name} are brought to safety.");
+                Samples += Rules.SamplesPerSurvivors;
+                report.Add($"Survivors in {name} are brought to safety, with what they learned of the Maw.");
             }
 
             // Events that need the Maw to hold the region are over once it falls.
@@ -421,7 +582,8 @@ public sealed class CampaignState
                 break;
             case CampaignEventKind.SurvivorConvoy:
                 SurvivorsRescued++;
-                report.Add($"The survivor convoy from {name} reaches safety.");
+                Samples += Rules.SamplesPerSurvivors;
+                report.Add($"The survivor convoy from {name} reaches safety, with its research.");
                 break;
             case CampaignEventKind.MeteorStrike:
                 report.Add($"The meteor crater at {name} is purged before nests take root.");

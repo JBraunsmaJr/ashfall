@@ -78,25 +78,49 @@ internal static class CampaignClient
         GlfwWindow window, VulkanRenderer renderer, GlfwInput input, ClientOptions options, CampaignState campaign, string path, int allies, string? message)
     {
         CampaignFiles.Save(campaign, path);
+        var profile = CommanderFiles.Load(CommanderFiles.DefaultPath);
         TurnReport? lastTurn = null;
+        CampaignTarget? selected = null;
+        var view = CampaignView.Mission;
         var played = 0;
         while (!window.ShouldClose)
         {
             // --autopilot with --campaign-missions plays that many missions unattended (smoke tests, demos).
             var autopilot = options.Autopilot && played < options.CampaignMissions && campaign.Outcome == CampaignOutcome.InProgress;
-            var choice = autopilot
-                ? new CampaignChoice(CampaignChoiceKind.Launch, CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty)
-                : Show(window, renderer, input, options, new CampaignScreen(campaign, allies, lastTurn, message));
+            CampaignChoice? choice;
+            if (autopilot)
+            {
+                CampaignAutopilot.BuyResearch(campaign);
+                choice = new CampaignChoice(CampaignChoiceKind.Launch, CampaignAutopilot.ChooseTarget(campaign), campaign.Difficulty);
+            }
+            else
+            {
+                var screen = new CampaignScreen(campaign, allies, lastTurn, message, profile) { Initial = selected, View = view };
+                choice = Show(window, renderer, input, options, screen);
+                view = screen.View;
+                selected = screen.Selected;
+                CommanderFiles.Save(profile, CommanderFiles.DefaultPath); // perks chosen on the screen
+            }
+
             message = null;
             if (choice is null || choice.Kind == CampaignChoiceKind.Leave)
             {
                 break;
             }
 
-            var mission = campaign.PlanMission(choice.Target, choice.Difficulty);
-            var spec = CampaignMatches.ToMatchSpec(mission, 1 + allies).WithController(0, PlayerController.Human);
+            if (choice.Kind == CampaignChoiceKind.Research)
+            {
+                campaign.Research(choice.Research!);
+                CampaignFiles.Save(campaign, path);
+                continue;
+            }
+
+            // Seat 0 is this player, with their commander; the AI allies fill the other seats.
+            var mission = campaign.PlanMission(choice.Target, choice.Difficulty, 1 + allies, [profile.Bonus()]);
+            var spec = CampaignMatches.ToMatchSpec(mission).WithController(0, PlayerController.Human);
             window.Title = "Ashfall - " + campaign.World.Regions[mission.Region].Name;
-            var result = await SkirmishClient.Run(window, renderer, input, options with { Frames = 0, UntilTick = 0, Screenshot = null }, spec).ConfigureAwait(false);
+            var result = await SkirmishClient.Run(window, renderer, input, options with { Frames = 0, UntilTick = 0, Screenshot = null }, spec, mission, campaign.Rules)
+                .ConfigureAwait(false);
             window.Title = "Ashfall";
             played++;
             if (result is not { } outcome)
@@ -107,7 +131,14 @@ internal static class CampaignClient
 
             lastTurn = campaign.Play(new TurnRecord(choice.Target, choice.Difficulty, outcome));
             CampaignFiles.Save(campaign, path);
-            Console.WriteLine($"Campaign turn {campaign.Turn}: {(outcome.Won ? "won" : "lost")} {campaign.World.Regions[mission.Region].Name}; {CampaignFiles.Summary(campaign)}");
+            var experience = Commanders.ExperienceFor(outcome);
+            if (profile.AddExperience(experience) is { } level)
+            {
+                message = $"{profile.Active.Name} reached level {level}: new perks unlocked.";
+            }
+
+            CommanderFiles.Save(profile, CommanderFiles.DefaultPath);
+            Console.WriteLine($"Campaign turn {campaign.Turn}: {(outcome.Won ? "won" : "lost")} {campaign.World.Regions[mission.Region].Name}, {outcome.Samples} samples, +{experience} experience; {CampaignFiles.Summary(campaign)}");
         }
 
         CampaignFiles.Save(campaign, path);

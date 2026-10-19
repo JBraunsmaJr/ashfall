@@ -39,11 +39,25 @@ public sealed record CampaignEvent(int Id, CampaignEventKind Kind, int Region, i
 /// <param name="NestsDestroyed">Nests the team destroyed.</param>
 /// <param name="NestsStanding">Nests still standing at the end; on a loss they push the Maw's spread.</param>
 /// <param name="Ticks">How long the mission lasted.</param>
-public readonly record struct MissionResult(bool Won, int NestsDestroyed, int NestsStanding, long Ticks)
+/// <param name="Samples">Samples brought back for research.</param>
+/// <param name="Survivors">
+/// Per seat, the surviving units each player keeps as their veteran detachment (unit ids); null when the mission does
+/// not say (detachments then stay as they were).
+/// </param>
+public readonly record struct MissionResult(bool Won, int NestsDestroyed, int NestsStanding, long Ticks, int Samples = 0, IReadOnlyList<IReadOnlyList<string>>? Survivors = null)
 {
-    public static MissionResult Victory(int nests, long ticks = 0) => new(true, nests, 0, ticks);
+    public static MissionResult Victory(int nests, long ticks = 0, int samples = 0) => new(true, nests, 0, ticks, samples);
 
-    public static MissionResult Defeat(int nestsDestroyed, int nestsStanding, long ticks = 0) => new(false, nestsDestroyed, nestsStanding, ticks);
+    public static MissionResult Defeat(int nestsDestroyed, int nestsStanding, long ticks = 0, int samples = 0) => new(false, nestsDestroyed, nestsStanding, ticks, samples);
+
+    public bool Equals(MissionResult other) =>
+        Won == other.Won && NestsDestroyed == other.NestsDestroyed && NestsStanding == other.NestsStanding && Ticks == other.Ticks
+        && Samples == other.Samples && SameSurvivors(Survivors, other.Survivors);
+
+    public override int GetHashCode() => HashCode.Combine(Won, NestsDestroyed, NestsStanding, Ticks, Samples);
+
+    private static bool SameSurvivors(IReadOnlyList<IReadOnlyList<string>>? a, IReadOnlyList<IReadOnlyList<string>>? b) =>
+        a is null || b is null ? a is null && b is null : a.Count == b.Count && a.Zip(b).All(pair => pair.First.SequenceEqual(pair.Second));
 }
 
 /// <summary>One played turn, as a save stores it: the target, the difficulty it was played on, and how it went.</summary>
@@ -88,6 +102,21 @@ public sealed record CampaignMission
 
     /// <summary>Extra starting harvesters per player, from liberated neighbours.</summary>
     public required int BonusHarvesters { get; init; }
+
+    /// <summary>
+    /// What each seat brings, in seat order: research and commander bonuses, research credits and harvesters, and the
+    /// seat's veteran detachment. Its length is the number of players.
+    /// </summary>
+    public required IReadOnlyList<Ashfall.Simulation.Players.PlayerLoadout> Loadouts { get; init; }
+
+    /// <summary>How many survivors each seat may keep afterwards (the detachment size plus commander perks).</summary>
+    public required IReadOnlyList<int> DetachmentSizes { get; init; }
+
+    /// <summary>Research: every nest is revealed at the start.</summary>
+    public bool RevealNests { get; init; }
+
+    /// <summary>Research: extra warning before every wave, in ticks.</summary>
+    public int TelegraphBonusTicks { get; init; }
 
     /// <summary>A one-paragraph briefing for the campaign screen and the lobby.</summary>
     public required string Briefing { get; init; }

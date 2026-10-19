@@ -98,7 +98,8 @@ public class MissionPlanningTests
         var a = CampaignState.Start(5, CampaignRuleSets.Standard, MawDifficulty.Veteran);
         var b = CampaignState.Start(5, CampaignRuleSets.Standard, MawDifficulty.Veteran);
         var target = a.Targets[0];
-        Assert.Equal(a.PlanMission(target), b.PlanMission(target));
+        Assert.Equal(a.PlanMission(target) with { Loadouts = [], DetachmentSizes = [] }, b.PlanMission(target) with { Loadouts = [], DetachmentSizes = [] });
+        Assert.Equal(a.PlanMission(target).Loadouts, b.PlanMission(target).Loadouts);
 
         var first = a.PlanMission(target);
         a.Play(new TurnRecord(target, MawDifficulty.Veteran, MissionResult.Defeat(0, first.Nests)));

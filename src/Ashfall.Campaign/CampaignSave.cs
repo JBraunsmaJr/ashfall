@@ -15,15 +15,17 @@ namespace Ashfall.Campaign;
 /// ashfall-campaign 1
 /// code ASH-3C91K-7QZ0M
 /// rules standard 0x1F2E3D4C5B6A7988
-/// turn region 12 Veteran won 4 0 31500
-/// turn event 2 Veteran lost 1 3 40210
+/// turn region 12 Veteran won 4 0 31500 samples=17 keep0=bulwark.warden,bulwark.rifleman keep1=bulwark.rocketeer
+/// research weapons-1
+/// turn event 2 Veteran lost 1 3 40210 samples=2 keep0= keep1=bulwark.rifleman
 /// hash 0x0123456789ABCDEF
 /// </code>
 /// </example>
 public static class CampaignSave
 {
     private const string Header = "ashfall-campaign";
-    private const int FormatVersion = 1;
+    // 1: turns only. 2: samples and detachments on turn lines, research lines.
+    private const int FormatVersion = 2;
 
     public static string Write(CampaignState campaign)
     {
@@ -32,11 +34,32 @@ public static class CampaignSave
         text.Append(CultureInfo.InvariantCulture, $"{Header} {FormatVersion}\n");
         text.Append(CultureInfo.InvariantCulture, $"code {campaign.Code}\n");
         text.Append(CultureInfo.InvariantCulture, $"rules {campaign.Rules.Id} {StateHasher.Format(campaign.RulesHash)}\n");
-        foreach (var turn in campaign.History)
+        var research = 0;
+        void ResearchAfter(int turns)
         {
+            while (research < campaign.ResearchLog.Count && campaign.ResearchLog[research].AfterTurn == turns)
+            {
+                text.Append("research ").Append(campaign.ResearchLog[research++].Id).Append('\n');
+            }
+        }
+
+        ResearchAfter(0);
+        for (var t = 0; t < campaign.History.Count; t++)
+        {
+            var turn = campaign.History[t];
             var result = turn.Result;
             text.Append(CultureInfo.InvariantCulture,
-                $"turn {(turn.Target.IsEvent ? "event" : "region")} {turn.Target.Id} {turn.Difficulty} {(result.Won ? "won" : "lost")} {result.NestsDestroyed} {result.NestsStanding} {result.Ticks}\n");
+                $"turn {(turn.Target.IsEvent ? "event" : "region")} {turn.Target.Id} {turn.Difficulty} {(result.Won ? "won" : "lost")} {result.NestsDestroyed} {result.NestsStanding} {result.Ticks} samples={result.Samples}");
+            if (result.Survivors is { } survivors)
+            {
+                for (var seat = 0; seat < survivors.Count; seat++)
+                {
+                    text.Append(CultureInfo.InvariantCulture, $" keep{seat}={string.Join(',', survivors[seat])}");
+                }
+            }
+
+            text.Append('\n');
+            ResearchAfter(t + 1);
         }
 
         text.Append(CultureInfo.InvariantCulture, $"hash {StateHasher.Format(campaign.ComputeHash())}\n");
@@ -53,7 +76,8 @@ public static class CampaignSave
         ArgumentNullException.ThrowIfNull(text);
         var lines = text.Replace("\r", string.Empty, StringComparison.Ordinal)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (lines.Length < 3 || lines[0] != string.Create(CultureInfo.InvariantCulture, $"{Header} {FormatVersion}"))
+        var version = lines.Length == 0 ? 0 : lines[0] == Header + " 1" ? 1 : lines[0] == string.Create(CultureInfo.InvariantCulture, $"{Header} {FormatVersion}") ? FormatVersion : 0;
+        if (lines.Length < 3 || version == 0)
         {
             throw new FormatException($"Not a campaign save (expected \"{Header} {FormatVersion}\" first).");
         }
@@ -86,7 +110,50 @@ public static class CampaignSave
                 continue;
             }
 
-            var fields = Fields(lines[i], "turn", 8);
+            if (lines[i].StartsWith("research ", StringComparison.Ordinal))
+            {
+                var id = Fields(lines[i], "research", 2)[1];
+                try
+                {
+                    campaign.Research(id);
+                }
+                catch (InvalidOperationException error)
+                {
+                    throw new FormatException($"Line {i + 1} is not research this campaign allows: {error.Message}", error);
+                }
+
+                continue;
+            }
+
+            var all = lines[i].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var fields = Fields(string.Join(' ', all.Take(8)), "turn", 8);
+            var samples = 0;
+            List<IReadOnlyList<string>>? survivors = null;
+            foreach (var extra in all.Skip(8))
+            {
+                var eq = extra.IndexOf('=', StringComparison.Ordinal);
+                var key = eq > 0 ? extra[..eq] : extra;
+                var value = eq > 0 ? extra[(eq + 1)..] : string.Empty;
+                if (key == "samples")
+                {
+                    samples = Number(value);
+                }
+                else if (key.StartsWith("keep", StringComparison.Ordinal) && Number(key[4..]) is var seat && seat < CampaignState.MaxSeats)
+                {
+                    survivors ??= [];
+                    while (survivors.Count <= seat)
+                    {
+                        survivors.Add([]);
+                    }
+
+                    survivors[seat] = value.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                }
+                else
+                {
+                    throw new FormatException($"Unknown entry {extra} on line {i + 1}.");
+                }
+            }
+
             var target = fields[1] switch
             {
                 "region" => CampaignTarget.Region(Number(fields[2])),
@@ -104,7 +171,7 @@ public static class CampaignSave
                 "lost" => false,
                 _ => throw new FormatException($"Expected won or lost on line {i + 1}, found {fields[4]}."),
             };
-            var result = new MissionResult(won, Number(fields[5]), Number(fields[6]), long.Parse(fields[7], NumberStyles.None, CultureInfo.InvariantCulture));
+            var result = new MissionResult(won, Number(fields[5]), Number(fields[6]), long.Parse(fields[7], NumberStyles.None, CultureInfo.InvariantCulture), samples, survivors);
             try
             {
                 campaign.Play(new TurnRecord(target, difficulty, result));

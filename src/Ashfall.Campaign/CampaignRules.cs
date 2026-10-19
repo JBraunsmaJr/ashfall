@@ -28,6 +28,41 @@ public enum CampaignEventKind
     LatticeBeacon,
 }
 
+/// <summary>What a research project does for every mission after it (GDD section 7, "Research").</summary>
+public enum ResearchEffect
+{
+    /// <summary>+Amount% damage for every player's units and defences.</summary>
+    Damage,
+
+    /// <summary>+Amount% hit points for every player's units.</summary>
+    UnitHealth,
+
+    /// <summary>+Amount% hit points for every player's structures.</summary>
+    StructureHealth,
+
+    /// <summary>+Amount% hit points for harvesters.</summary>
+    HarvesterHealth,
+
+    /// <summary>Repairs cost Amount% less.</summary>
+    RepairCost,
+
+    /// <summary>+Amount starting credits for every player.</summary>
+    Credits,
+
+    /// <summary>+Amount starting harvesters for every player.</summary>
+    Harvesters,
+
+    /// <summary>Every nest is revealed at the start of a mission.</summary>
+    RevealNests,
+
+    /// <summary>+Amount ticks of warning before every telegraphed wave.</summary>
+    Telegraph,
+}
+
+/// <summary>A research project: bought once with samples, for the whole team, once its prerequisite is done.</summary>
+/// <param name="Requires">The project that must be done first, or null.</param>
+public sealed record ResearchNode(string Id, string Name, string Description, int Cost, string? Requires, ResearchEffect Effect, int Amount);
+
 /// <summary>How often an event comes up and how long it waits for an answer.</summary>
 /// <param name="Weight">Relative chance among the events that have a valid region; 0 never rolls it.</param>
 /// <param name="Lifetime">Turns it stays on the map before it expires with its consequence.</param>
@@ -99,6 +134,51 @@ public sealed record CampaignRules
     /// difficulty: a lower ceiling makes the meter climb faster.
     /// </summary>
     public IReadOnlyList<int> DifficultyMeterCeilingPercent { get; init; } = [95, 90, 85, 80];
+
+    /// <summary>Samples earned per nest destroyed, by the tier the nests started at (index 0 unused).</summary>
+    public IReadOnlyList<int> SamplesPerNest { get; init; } = [0, 2, 3, 5];
+
+    /// <summary>Samples for winning a mission.</summary>
+    public int SamplesForVictory { get; init; } = 5;
+
+    /// <summary>Samples brought home by survivors: a liberated city or a convoy brought through.</summary>
+    public int SamplesPerSurvivors { get; init; } = 6;
+
+    /// <summary>Surviving units each player may keep for the next mission (GDD: up to 6).</summary>
+    public int DetachmentSize { get; init; } = 6;
+
+    /// <summary>The shared research tree. Ids are written in saves, so they never change once released.</summary>
+    public IReadOnlyList<ResearchNode> Research { get; init; } =
+    [
+        new("weapons-1", "Hardened Rounds", "+10% damage for every unit and defence.", 20, null, ResearchEffect.Damage, 10),
+        new("weapons-2", "Depleted Cores", "+10% more damage.", 45, "weapons-1", ResearchEffect.Damage, 10),
+        new("armour-1", "Composite Plating", "+10% hit points for every unit.", 20, null, ResearchEffect.UnitHealth, 10),
+        new("armour-2", "Reactive Plating", "+10% more hit points for every unit.", 45, "armour-1", ResearchEffect.UnitHealth, 10),
+        new("fortify-1", "Reinforced Concrete", "+20% hit points for every structure.", 25, null, ResearchEffect.StructureHealth, 20),
+        new("harvest-1", "Armoured Haulers", "+25% hit points for harvesters.", 15, null, ResearchEffect.HarvesterHealth, 25),
+        new("repair-1", "Field Engineering", "Repairs cost 25% less.", 25, "fortify-1", ResearchEffect.RepairCost, 25),
+        new("logistics-1", "Forward Supply", "+750 starting credits in every mission.", 20, null, ResearchEffect.Credits, 750),
+        new("logistics-2", "Field Refineries", "An extra harvester at the start of every mission.", 40, "logistics-1", ResearchEffect.Harvesters, 1),
+        new("intel-1", "Seismic Mapping", "Every nest is revealed when a mission starts.", 30, null, ResearchEffect.RevealNests, 1),
+        new("intel-2", "Early Warning", "Five more seconds of warning before every wave.", 35, "intel-1", ResearchEffect.Telegraph, 75),
+    ];
+
+    /// <summary>Samples a mission earns: its nests destroyed, by starting tier, and a bonus for winning.</summary>
+    public int SamplesFor(bool won, int nestsDestroyed, int nestTier) =>
+        (nestsDestroyed * SamplesPerNest[nestTier < 1 ? 1 : nestTier > 3 ? 3 : nestTier]) + (won ? SamplesForVictory : 0);
+
+    public ResearchNode? FindResearch(string id)
+    {
+        foreach (var node in Research)
+        {
+            if (node.Id == id)
+            {
+                return node;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Most events on the map at once.</summary>
     public int MaxActiveEvents { get; init; } = 3;
@@ -185,6 +265,19 @@ public sealed record CampaignRules
             ArgumentOutOfRangeException.ThrowIfGreaterThan(ceiling, 100, nameof(DifficultyMeterCeilingPercent));
         }
 
+        if (SamplesPerNest.Count != 4)
+        {
+            throw new ArgumentOutOfRangeException(nameof(SamplesPerNest), "One value per nest tier 1-3 (and an unused 0).");
+        }
+
+        foreach (var node in Research)
+        {
+            if (node.Requires is { } requires && FindResearch(requires) is null)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Research), node.Id, $"Requires the unknown project {requires}.");
+            }
+        }
+
         foreach (var tier in NestTierByInfestation)
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(tier, 1, nameof(NestTierByInfestation));
@@ -234,6 +327,20 @@ public sealed record CampaignRules
         hasher.Add(CreditsPerSurvivorNeighbour);
         hasher.Add(NeighboursPerHarvester);
         hasher.Add(MaxBonusHarvesters);
+        AddAll(ref hasher, SamplesPerNest);
+        hasher.Add(SamplesForVictory);
+        hasher.Add(SamplesPerSurvivors);
+        hasher.Add(DetachmentSize);
+        hasher.Add(Research.Count);
+        foreach (var node in Research)
+        {
+            hasher.Add(node.Id);
+            hasher.Add(node.Cost);
+            hasher.Add(node.Requires);
+            hasher.Add((int)node.Effect);
+            hasher.Add(node.Amount);
+        }
+
         return hasher.Value;
     }
 

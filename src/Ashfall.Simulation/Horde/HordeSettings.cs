@@ -51,6 +51,9 @@ public sealed record HordeSettings
     /// <summary>With a director: how hard it pushes.</summary>
     public MawDifficulty Difficulty { get; init; } = MawDifficulty.Veteran;
 
+    /// <summary>Extra warning before every telegraphed wave (campaign research), in ticks.</summary>
+    public int TelegraphBonusTicks { get; init; }
+
     public void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfNegative(CreatureType, nameof(CreatureType));
@@ -66,5 +69,6 @@ public sealed record HordeSettings
         }
         ArgumentOutOfRangeException.ThrowIfNegative(FirstWaveSize, nameof(FirstWaveSize));
         ArgumentOutOfRangeException.ThrowIfNegative(WaveGrowth, nameof(WaveGrowth));
+        ArgumentOutOfRangeException.ThrowIfNegative(TelegraphBonusTicks, nameof(TelegraphBonusTicks));
     }
 }

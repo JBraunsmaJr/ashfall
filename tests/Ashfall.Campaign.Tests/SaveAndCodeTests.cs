@@ -57,7 +57,7 @@ public class SaveAndCodeTests
         var campaign = CampaignState.Start(9, CampaignRuleSets.Standard, MawDifficulty.Elite);
         CampaignAutopilot.PlayToEnd(campaign, 70, 9, maxTurns: 25);
         var text = CampaignSave.Write(campaign);
-        Assert.StartsWith("ashfall-campaign 1\ncode ASH-", text, StringComparison.Ordinal);
+        Assert.StartsWith("ashfall-campaign 2\ncode ASH-", text, StringComparison.Ordinal);
         Assert.True(text.Length < 4_096, "A save is a few kilobytes.");
 
         var loaded = CampaignSave.Read(text);

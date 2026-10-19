@@ -1,8 +1,9 @@
-using Ashfall.Core;
+﻿using Ashfall.Core;
 using Ashfall.MapGen;
 using Ashfall.Session.Maps;
 using Ashfall.Simulation;
 using Ashfall.Simulation.Horde;
+using Ashfall.Simulation.Players;
 
 namespace Ashfall.Session;
 
@@ -110,6 +111,18 @@ public sealed record MatchSpec
 
     /// <summary>Most extra starting harvesters per player.</summary>
     public const int MaxBonusHarvesters = 4;
+
+    /// <summary>
+    /// Purge only: what each player brings from the campaign (research and perk bonuses, extra credits and harvesters,
+    /// a veteran detachment), one per player in seat order; empty for none.
+    /// </summary>
+    public IReadOnlyList<PlayerLoadout> Loadouts { get; init; } = [];
+
+    /// <summary>Purge only: every nest is shown on the map from the start (campaign research).</summary>
+    public bool RevealNests { get; init; }
+
+    /// <summary>Purge only: extra warning before every telegraphed wave, in ticks (campaign research).</summary>
+    public int TelegraphBonusTicks { get; init; }
 
     /// <summary>The default proving-ground match for <paramref name="seed"/>.</summary>
     public static MatchSpec ProvingGround(ulong seed) => new() { Seed = seed };
@@ -314,6 +327,18 @@ public sealed record MatchSpec
             ArgumentOutOfRangeException.ThrowIfGreaterThan(BonusCredits, 100_000, nameof(BonusCredits));
             ArgumentOutOfRangeException.ThrowIfNegative(BonusHarvesters, nameof(BonusHarvesters));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(BonusHarvesters, MaxBonusHarvesters, nameof(BonusHarvesters));
+            if (Loadouts.Count != 0 && Loadouts.Count != Players)
+            {
+                throw new ArgumentOutOfRangeException(nameof(Loadouts), Loadouts.Count, "One loadout per player, or none.");
+            }
+
+            foreach (var loadout in Loadouts)
+            {
+                loadout.Validate();
+            }
+
+            ArgumentOutOfRangeException.ThrowIfNegative(TelegraphBonusTicks, nameof(TelegraphBonusTicks));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(TelegraphBonusTicks, 900, nameof(TelegraphBonusTicks));
             ArgumentOutOfRangeException.ThrowIfLessThan(Creatures, 1, nameof(Creatures));
             ArgumentOutOfRangeException.ThrowIfGreaterThan(Creatures, SwarmMaxCreatures, nameof(Creatures));
         }

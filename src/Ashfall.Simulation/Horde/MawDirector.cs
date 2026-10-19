@@ -13,7 +13,8 @@ public sealed class MawDirector
 
     internal MawDirector(HordeSettings settings, int players)
     {
-        Profile = DirectorProfile.For(settings.Difficulty);
+        var profile = DirectorProfile.For(settings.Difficulty);
+        Profile = settings.TelegraphBonusTicks > 0 ? profile with { TelegraphTicks = profile.TelegraphTicks + settings.TelegraphBonusTicks } : profile;
         _lastTargeted = new long[players];
         Array.Fill(_lastTargeted, -1);
 

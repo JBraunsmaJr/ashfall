@@ -170,7 +170,7 @@ public sealed class RepairSystem : ISystem
         var room = health.Max - health.Current;
         var pulse = PulseOf(health.Max, rules);
         var amount = pulse < room ? pulse : room;
-        var cost = CostOf(price, amount, health.Max, rules);
+        var cost = CostOf(price, amount, health.Max, rules) * player.Modifiers.RepairCostPercent / 100;
         if (!player.CanAfford(cost))
         {
             return;
