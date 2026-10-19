@@ -216,11 +216,11 @@ public sealed class GameScreen
         scene.Clear();
         scene.ClearColor = Palette.Clear;
         scene.Time = (float)time;
-        scene.SunDirection = Vector3.Normalize(new Vector3(-0.55f, 0.2f, 0.8f));
-        // Late-afternoon light: a low warm sun and a cool ambient, dim enough for base lights,
-        // muzzle flashes and Cindrite glow to read.
-        scene.SunColor = new LinearColor(0.62f, 0.52f, 0.40f);
-        scene.Ambient = new LinearColor(0.20f, 0.22f, 0.30f);
+        // A low, warm late-day sun raking across the map and a cool, dim sky, as in the concept art: strong shape on
+        // every block, and dark enough between them for Cindrite, base lights and muzzle flashes to glow.
+        scene.SunDirection = Vector3.Normalize(new Vector3(-0.62f, 0.28f, 0.72f));
+        scene.SunColor = new LinearColor(0.82f, 0.64f, 0.44f);
+        scene.Ambient = new LinearColor(0.17f, 0.18f, 0.24f);
 
         _batch.Camera = Camera;
         _batch.Visibility = _fog.Enabled ? _fog.Sample : null;
@@ -234,6 +234,7 @@ public sealed class GameScreen
         }
 
         _painter.PaintStructures(Simulation, Player, _selectedSet, scene);
+        _painter.LightCindrite(Simulation, Camera, scene);
         _painter.PaintUnits(Simulation, Player, _selectedSet, Math.Clamp(alpha, 0f, 1f));
         _painter.PaintCreatures(Simulation, Math.Clamp(alpha, 0f, 1f));
         if (_placing >= 0 && _lineStart is { } lineStart)

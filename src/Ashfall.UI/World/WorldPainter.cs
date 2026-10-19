@@ -72,14 +72,23 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                         batch.Flat(x, y, 1, 1, top, color);
                         break;
                     default:
-                        var cindrite = map.CindriteAt(cell);
-                        color = Palette.Scale(Variation(cindrite > 0 ? Palette.CindriteGround : Palette.Ground, x, y, 0.07f), 1f + (map.HeightAt(cell) * 0.05f));
-                        batch.Flat(x, y, 1, 1, top, color);
+                        // Earth broken by moss, in four sub-tiles so the patches don't follow the grid.
+                        var lift = 1f + (map.HeightAt(cell) * 0.06f);
+                        var stained = map.CindriteAt(cell) > 0;
+                        for (var sub = 0; sub < 4; sub++)
+                        {
+                            var sx = x + ((sub & 1) * 0.5f);
+                            var sy = y + ((sub >> 1) * 0.5f);
+                            batch.Flat(sx, sy, 0.5f, 0.5f, top, Palette.Scale(GroundColor(sx + 0.25f, sy + 0.25f, stained), lift));
+                        }
+
+                        color = Palette.Scale(GroundColor(x + 0.5f, y + 0.5f, stained), lift);
                         break;
                 }
 
-                // Skirts down to lower neighbours on the two sides the camera sees, so steps have faces, not cracks.
-                var side = Palette.Scale(color, 0.6f);
+                // Skirts down to lower neighbours on the two sides the camera sees, so steps have faces, not cracks:
+                // bare earth darkening toward the rock beneath.
+                var side = Palette.Mix(Palette.Scale(color, 0.55f), Palette.RockDark, 0.35f);
                 var east = new Cell(x + 1, y);
                 if (map.InBounds(east) && SurfaceHeight(map, east) < top)
                 {
@@ -107,11 +116,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 switch (map.TerrainAt(cell))
                 {
                     case Terrain.Rock:
-                        // Cliffs and outcrops: rock from the lowest ground up past the cell's level.
-                        batch.Begin(x + y + 1);
-                        var height = top + 0.3f + (Hash(x, y) % 4 * 0.06f);
-                        batch.Box(x, y, 1, 1, 0, height, Variation(Palette.Rock, x, y, 0.08f), Variation(Palette.RockTop, x, y, 0.08f));
-                        batch.End();
+                        PaintRock(x, y, top);
                         continue;
 
                     case Terrain.Trees:
@@ -141,13 +146,97 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
                 {
                     PaintCrystals(x, y, cindrite, top);
                 }
+                else if (map.TerrainAt(cell) == Terrain.Clear && map.StructureAt(cell) < 0)
+                {
+                    PaintGroundCover(x, y, top);
+                }
             }
         }
     }
 
+    // Earth with patches of moss (broad, soft noise) and darker soil (finer noise); Cindrite stains it green.
+    private static LinearColor GroundColor(float x, float y, bool stained)
+    {
+        var moss = SmoothStep(0.42f, 0.68f, Noise(x, y, 5.5f, 11));
+        var soil = Noise(x, y, 2.3f, 23);
+        var earth = Palette.Mix(Palette.Ground, Palette.GroundDark, soil * 0.7f);
+        var ground = Palette.Mix(earth, Palette.Mix(Palette.Moss, Palette.MossLight, Noise(x, y, 1.7f, 31)), moss * 0.85f);
+        return stained ? Palette.Mix(ground, Palette.CindriteGround, 0.7f) : ground;
+    }
+
+    // Grass tufts on mossy ground and the odd stone on bare earth, so open ground has texture at a glance.
+    private void PaintGroundCover(int x, int y, float ground)
+    {
+        var seed = Hash(x, y);
+        var moss = Noise(x + 0.5f, y + 0.5f, 5.5f, 11);
+        if (moss > 0.55f && seed % 3 == 0)
+        {
+            batch.Begin(x + y + 0.2f, ground);
+            for (var i = 0; i < 3; i++)
+            {
+                var ox = 0.15f + (((seed >> (i * 5)) & 0xF) / 15f * 0.7f);
+                var oy = 0.15f + (((seed >> ((i * 5) + 3)) & 0xF) / 15f * 0.7f);
+                var tall = 0.06f + (((seed >> (i + 9)) & 0x3) * 0.025f);
+                var blade = Palette.Mix(Palette.Grass, Palette.MossLight, ((seed >> (i * 2)) & 0x3) / 3f);
+                batch.Box(x + ox - 0.04f, y + oy - 0.04f, 0.08f, 0.08f, 0, tall, Palette.Scale(blade, 0.7f), blade);
+            }
+
+            batch.End();
+        }
+        else if (moss < 0.35f && seed % 7 == 0)
+        {
+            batch.Begin(x + y + 0.2f, ground);
+            var ox = 0.2f + ((seed >> 4 & 0xF) / 15f * 0.6f);
+            var oy = 0.2f + ((seed >> 8 & 0xF) / 15f * 0.6f);
+            var size = 0.07f + ((seed >> 12 & 0x3) * 0.03f);
+            batch.Box(x + ox - size, y + oy - size, size * 2, size * 1.6f, 0, size * 0.9f, Palette.Scale(Palette.Pebble, 0.7f), Palette.Pebble);
+            batch.End();
+        }
+    }
+
+    // Cliffs and outcrops: dark slate from the lowest ground up past the cell's level, broken into a craggy top.
+    private void PaintRock(int x, int y, float top)
+    {
+        var seed = Hash(x, y);
+        batch.Begin(x + y + 1);
+        var height = top + 0.28f + (seed % 4 * 0.05f);
+        batch.Box(x, y, 1, 1, 0, height, Variation(Palette.Rock, x, y, 0.1f), Variation(Palette.RockTop, x, y, 0.1f));
+        for (var i = 0; i < 2; i++)
+        {
+            var ox = 0.05f + (((seed >> (i * 6)) & 0xF) / 15f * 0.45f);
+            var oy = 0.05f + (((seed >> ((i * 6) + 4)) & 0xF) / 15f * 0.45f);
+            var size = 0.3f + (((seed >> (i + 14)) & 0x3) * 0.06f);
+            var crag = height + 0.1f + (((seed >> (i * 3 + 18)) & 0x7) * 0.04f);
+            batch.Box(x + ox, y + oy, size, size, height - 0.05f, crag, Palette.Scale(Palette.Rock, 0.85f), Variation(Palette.RockTop, x + i, y, 0.12f));
+        }
+
+        batch.End();
+    }
+
+    // Value noise: smooth, repeatable, 0..1, with features about `scale` cells across.
+    private static float Noise(float x, float y, float scale, int salt)
+    {
+        var fx = x / scale;
+        var fy = y / scale;
+        var ix = (int)MathF.Floor(fx);
+        var iy = (int)MathF.Floor(fy);
+        var tx = SmoothStep(0f, 1f, fx - ix);
+        var ty = SmoothStep(0f, 1f, fy - iy);
+        float At(int cx, int cy) => (Hash(cx + (salt * 7919), cy - (salt * 104729)) & 0xFFFF) / 65535f;
+        var top = At(ix, iy) + ((At(ix + 1, iy) - At(ix, iy)) * tx);
+        var bottom = At(ix, iy + 1) + ((At(ix + 1, iy + 1) - At(ix, iy + 1)) * tx);
+        return top + ((bottom - top) * ty);
+    }
+
+    private static float SmoothStep(float edge0, float edge1, float value)
+    {
+        var t = Math.Clamp((value - edge0) / (edge1 - edge0), 0f, 1f);
+        return t * t * (3f - (2f * t));
+    }
+
     private void PaintTree(int x, int y, float ground)
     {
-        // One or two trees per cell, each a trunk under a stacked canopy, jittered so woods look natural.
+        // One or two dark conifers per cell, three tiers each, jittered so woods look natural.
         var seed = Hash(x, y);
         batch.Begin(x + y + 1, ground);
         var count = 1 + (seed & 1);
@@ -155,12 +244,19 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         {
             var ox = 0.25f + (((seed >> (4 + (i * 6))) & 0xF) / 15f * 0.5f);
             var oy = 0.25f + (((seed >> (8 + (i * 6))) & 0xF) / 15f * 0.5f);
-            var size = 0.22f + (((seed >> (12 + i)) & 0x3) * 0.04f);
-            var height = 0.5f + (((seed >> (16 + i)) & 0x3) * 0.08f);
-            batch.Disc(new Vector2(x + ox + 0.08f, y + oy - 0.04f), size * 1.2f, GroundEpsilon, Palette.Shadow);
-            batch.Box(x + ox - 0.04f, y + oy - 0.04f, 0.08f, 0.08f, 0, height * 0.4f, Palette.Trunk, Palette.Trunk);
-            batch.Box(x + ox - size, y + oy - size, size * 2, size * 2, height * 0.35f, height, Palette.Leaves, Palette.LeavesTop);
-            batch.Box(x + ox - (size * 0.6f), y + oy - (size * 0.6f), size * 1.2f, size * 1.2f, height, height + 0.18f, Palette.Leaves, Palette.LeavesTop);
+            var size = 0.2f + (((seed >> (12 + i)) & 0x3) * 0.035f);
+            var height = 0.62f + (((seed >> (16 + i)) & 0x3) * 0.1f);
+            var shade = 0.85f + (((seed >> (20 + i)) & 0x3) * 0.08f);
+            var leaves = Palette.Scale(Palette.Leaves, shade);
+            var top = Palette.Scale(Palette.LeavesTop, shade);
+            batch.Disc(new Vector2(x + ox + 0.1f, y + oy - 0.05f), size * 1.3f, GroundEpsilon, Palette.Shadow);
+            batch.Box(x + ox - 0.035f, y + oy - 0.035f, 0.07f, 0.07f, 0, height * 0.3f, Palette.Trunk, Palette.Trunk);
+            for (var tier = 0; tier < 3; tier++)
+            {
+                var spread = size * (1f - (tier * 0.28f));
+                var low = height * (0.22f + (tier * 0.25f));
+                batch.Box(x + ox - spread, y + oy - spread, spread * 2, spread * 2, low, low + (height * 0.3f), leaves, top);
+            }
         }
 
         batch.End();
@@ -247,35 +343,70 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
             var heading = motion.HeadingOf(entity);
             var forward = new Vector2(MathF.Cos(heading), MathF.Sin(heading));
             batch.Begin(position.X + position.Y, GroundHeight(simulation.Map, position.X, position.Y));
+            var side = new Vector2(-forward.Y, forward.X);
             switch (simulation.Content.Creature(creatures.Get(index).CreatureType).Id)
             {
                 case MawContent.Siegebeast:
-                    batch.Disc(position + new Vector2(0.08f, -0.04f), 0.55f, GroundEpsilon, Palette.Shadow);
-                    batch.RotatedBox(position, 0.95f, 0.7f, heading, 0.04f, 0.5f, Palette.MawCarapaceDark, Palette.MawCarapace);
-                    batch.RotatedBox(position + (forward * 0.42f), 0.3f, 0.4f, heading, 0.08f, 0.38f, Palette.MawFlesh, Palette.MawCarapace);
+                    // A hulking crimson carapace on six thick legs, a row of spines down its back, embers for eyes.
+                    batch.Disc(position + new Vector2(0.08f, -0.04f), 0.6f, GroundEpsilon, Palette.Shadow);
+                    Legs(position, forward, side, 3, 0.36f, 0.62f, 0.09f, 0.3f);
+                    batch.RotatedBox(position, 0.95f, 0.72f, heading, 0.16f, 0.52f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.RotatedBox(position - (forward * 0.12f), 0.6f, 0.5f, heading, 0.52f, 0.64f, Palette.MawCarapace, Palette.MawFlesh);
+                    batch.RotatedBox(position + (forward * 0.48f), 0.3f, 0.42f, heading, 0.14f, 0.42f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    Eyes(position + (forward * 0.62f), side, 0.12f, 0.36f, 0.05f);
                     for (var spike = -1; spike <= 1; spike++)
                     {
-                        var at = position - (forward * (spike * 0.22f));
-                        batch.Box(at.X - 0.06f, at.Y - 0.06f, 0.12f, 0.12f, 0.5f, 0.72f - (Math.Abs(spike) * 0.08f), Palette.Scale(Palette.MawGlow, 0.7f), Palette.MawGlow, emissive: 0.8f);
+                        var at = position - (forward * (0.1f + (spike * 0.22f)));
+                        Spike(at, -forward * 0.12f, 0.14f, 0.62f, 0.95f - (Math.Abs(spike) * 0.1f), Palette.MawCarapaceDark, Palette.MawGlow, 0.5f);
                     }
 
                     break;
 
                 case MawContent.Spitter:
-                    batch.Disc(position + new Vector2(0.04f, -0.02f), 0.2f, GroundEpsilon, Palette.Shadow);
-                    batch.RotatedBox(position, 0.24f, 0.2f, heading, 0.02f, 0.34f, Palette.MawCarapaceDark, Palette.MawCarapace);
-                    batch.Disc(position - (forward * 0.06f), 0.1f, 0.4f, Palette.Acid, emissive: 0.7f);
+                    // Upright on four legs with a swollen violet acid sac on its back.
+                    batch.Disc(position + new Vector2(0.04f, -0.02f), 0.24f, GroundEpsilon, Palette.Shadow);
+                    Legs(position, forward, side, 2, 0.18f, 0.32f, 0.04f, 0.16f);
+                    batch.RotatedBox(position + (forward * 0.06f), 0.24f, 0.2f, heading, 0.1f, 0.34f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.Disc(position - (forward * 0.08f), 0.13f, 0.36f, Palette.MawViolet, emissive: 0.75f);
+                    batch.Disc(position - (forward * 0.08f), 0.2f, 0.37f, Palette.WithAlpha(Palette.MawViolet, 0.35f), emissive: 1f, shape: QuadShape.Glow);
+                    Eyes(position + (forward * 0.18f), side, 0.05f, 0.28f, 0.025f);
                     break;
 
                 default:
-                    // Skitter: low and many-legged, an ember on its back.
-                    batch.RotatedBox(position, 0.3f, 0.18f, heading, 0.01f, 0.12f, Palette.MawCarapaceDark, Palette.MawCarapace);
-                    batch.Disc(position, 0.04f, 0.13f, Palette.MawGlow, emissive: 0.9f);
+                    // Skitter: a low crimson spider, legs splayed, ember eyes.
+                    Legs(position, forward, side, 3, 0.13f, 0.24f, 0.025f, 0.08f);
+                    batch.RotatedBox(position - (forward * 0.07f), 0.2f, 0.18f, heading, 0.05f, 0.16f, Palette.MawCarapaceDark, Palette.MawCarapace);
+                    batch.RotatedBox(position + (forward * 0.07f), 0.12f, 0.12f, heading, 0.05f, 0.13f, Palette.MawCarapace, Palette.MawFlesh);
+                    Eyes(position + (forward * 0.13f), side, 0.03f, 0.12f, 0.02f);
                     break;
             }
 
             batch.End();
         }
+    }
+
+    // Pairs of splayed legs either side of a creature, each a thin slab angling down from the body to the ground.
+    private void Legs(Vector2 position, Vector2 forward, Vector2 side, int pairs, float hip, float reach, float thickness, float height)
+    {
+        for (var pair = 0; pair < pairs; pair++)
+        {
+            var along = pairs == 1 ? 0f : ((pair / (float)(pairs - 1)) - 0.5f) * hip * 1.6f;
+            foreach (var sign in new[] { -1f, 1f })
+            {
+                var direction = Vector2.Normalize((side * sign) + (forward * (along / hip * 0.7f)));
+                var knee = position + (forward * along) + (direction * reach * 0.6f);
+                var angle = MathF.Atan2(direction.Y, direction.X);
+                batch.RotatedBox(position + (forward * along) + (direction * reach * 0.3f), reach * 0.6f, thickness, angle, height * 0.7f, height, Palette.MawCarapaceDark, Palette.MawCarapace);
+                batch.RotatedBox(knee + (direction * reach * 0.2f), reach * 0.45f, thickness, angle, 0f, height * 0.75f, Palette.MawCarapaceDark, Palette.MawCarapaceDark);
+            }
+        }
+    }
+
+    // Two glowing ember eyes on the front of a creature's head.
+    private void Eyes(Vector2 head, Vector2 side, float spread, float z, float size)
+    {
+        batch.Disc(head + (side * spread), size, z, Palette.MawGlow, emissive: 1f);
+        batch.Disc(head - (side * spread), size, z, Palette.MawGlow, emissive: 1f);
     }
 
     /// <summary>
@@ -320,13 +451,51 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
     public static float StructureHeight(StructureRole role) => role switch
     {
         StructureRole.Defence => 0.5f,
-        StructureRole.ConstructionYard => 1.0f,
-        StructureRole.PowerPlant => 0.7f,
-        StructureRole.Refinery => 0.75f,
-        StructureRole.Barracks => 0.6f,
-        StructureRole.Factory => 0.85f,
+        StructureRole.ConstructionYard => 1.15f,
+        StructureRole.PowerPlant => 0.8f,
+        StructureRole.Refinery => 0.85f,
+        StructureRole.Barracks => 0.75f,
+        StructureRole.Factory => 0.95f,
         _ => 0.7f,
     };
+
+    // A paved plate under every building, slightly larger than its footprint, with seams on the cell lines and
+    // hazard striping before the doors of anything that rolls units out.
+    private void PaintPlate(StructureDefinition definition, Cell origin)
+    {
+        var margin = definition.Width > 1 ? 0.22f : 0.08f;
+        batch.Flat(origin.X - margin, origin.Y - margin, definition.Width + (2 * margin), definition.Height + (2 * margin), GroundEpsilon * 2, Palette.Pavement);
+        for (var i = 1; i < definition.Width; i++)
+        {
+            batch.Flat(origin.X + i - 0.015f, origin.Y - margin, 0.03f, definition.Height + (2 * margin), GroundEpsilon * 3, Palette.PavementSeam);
+        }
+
+        for (var i = 1; i < definition.Height; i++)
+        {
+            batch.Flat(origin.X - margin, origin.Y + i - 0.015f, definition.Width + (2 * margin), 0.03f, GroundEpsilon * 3, Palette.PavementSeam);
+        }
+
+        if (definition.Role is StructureRole.Barracks or StructureRole.Factory or StructureRole.RepairBay or StructureRole.Refinery)
+        {
+            for (var stripe = 0; stripe < definition.Width * 3; stripe++)
+            {
+                if (stripe % 2 == 0)
+                {
+                    batch.Flat(origin.X + (stripe / 3f), origin.Y + definition.Height + margin - 0.1f, 1f / 3f, 0.1f, GroundEpsilon * 4, Palette.Hazard);
+                }
+            }
+        }
+
+        batch.Box(origin.X, origin.Y, definition.Width, definition.Height, 0, 0.06f, Palette.ConcreteDark, Palette.Scale(Palette.ConcreteDark, 1.1f));
+    }
+
+    // A flat panel on a building's front (+y) face, from x0 to x1 and z0 to z1.
+    private void FacePanelY(float x0, float x1, float face, float z0, float z1, LinearColor color, float emissive = 0f) =>
+        batch.Quad(new Vector3(x0, face, z0), new Vector3(x1, face, z0), new Vector3(x1, face, z1), new Vector3(x0, face, z1), Vector3.UnitY, color, emissive);
+
+    // A flat panel on a building's side (+x) face.
+    private void FacePanelX(float face, float y0, float y1, float z0, float z1, LinearColor color, float emissive = 0f) =>
+        batch.Quad(new Vector3(face, y0, z0), new Vector3(face, y1, z0), new Vector3(face, y1, z1), new Vector3(face, y0, z1), Vector3.UnitX, color, emissive);
 
     // Which way a guard tower's guns point: at its target, or south-east at rest.
     private static float TowerAim(GameSimulation simulation, Cell origin)
@@ -373,35 +542,58 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         var depth = definition.Height - 0.16f;
         var height = StructureHeight(definition.Role);
 
-        // Foundation slab.
-        batch.Box(origin.X, origin.Y, definition.Width, definition.Height, 0, 0.06f, Palette.ConcreteDark, Palette.Scale(Palette.ConcreteDark, 1.1f));
+        PaintPlate(definition, origin);
 
         if (progress < 1f)
         {
-            // Under construction: a translucent shell rising with progress.
+            // Under construction: a translucent shell rising with progress inside a scaffold of corner posts.
             var shell = Palette.WithAlpha(Palette.Concrete, 0.55f);
-            batch.Box(x, y, width, depth, 0.06f, 0.06f + (height * Math.Max(0.08f, progress)), shell, Palette.WithAlpha(team, 0.6f));
+            var reached = 0.06f + (height * Math.Max(0.08f, progress));
+            batch.Box(x, y, width, depth, 0.06f, reached, shell, Palette.WithAlpha(team, 0.6f));
+            foreach (var (px, py) in new[] { (x, y + depth - 0.06f), (x + width - 0.06f, y + depth - 0.06f), (x + width - 0.06f, y) })
+            {
+                batch.Box(px, py, 0.06f, 0.06f, 0.06f, height + 0.1f, Palette.HarvesterYellow, Palette.HarvesterYellow);
+            }
+
             return;
         }
 
-        batch.Box(x, y, width, depth, 0.06f, height, Palette.Concrete, Palette.Scale(Palette.Concrete, 1.05f));
+        // A gunmetal hull in two tiers: a broad base and a narrower upper deck set back from the front.
+        var deck = height * 0.62f;
+        batch.Box(x, y, width, depth, 0.06f, deck, Palette.Concrete, Palette.Scale(Palette.Concrete, 1.08f));
+        var upperX = x + 0.12f;
+        var upperY = y + 0.08f;
+        var upperWidth = width - 0.42f;
+        var upperDepth = depth - 0.5f;
+        batch.Box(upperX, upperY, upperWidth, upperDepth, deck, height, Palette.ConcreteDark, Palette.Concrete);
 
-        // Team colour: a stripe round the visible top edge of the walls, and a roof marker.
-        batch.Quad(
-            new Vector3(x, y + depth + 0.005f, height - 0.12f),
-            new Vector3(x + width, y + depth + 0.005f, height - 0.12f),
-            new Vector3(x + width, y + depth + 0.005f, height - 0.04f),
-            new Vector3(x, y + depth + 0.005f, height - 0.04f),
-            Vector3.UnitY,
-            team);
-        batch.Quad(
-            new Vector3(x + width + 0.005f, y, height - 0.12f),
-            new Vector3(x + width + 0.005f, y + depth, height - 0.12f),
-            new Vector3(x + width + 0.005f, y + depth, height - 0.04f),
-            new Vector3(x + width + 0.005f, y, height - 0.04f),
-            Vector3.UnitX,
-            team);
-        batch.Box(x + width - 0.55f, y + depth - 0.55f, 0.35f, 0.35f, height, height + 0.04f, Palette.Scale(team, 0.8f), team);
+        // Faction colour, big and readable: panels down the front, a trim band round the base tier, a banner.
+        var front = y + depth + 0.006f;
+        var side = x + width + 0.006f;
+        var panels = Math.Max(1, definition.Width - 1);
+        for (var i = 0; i < panels; i++)
+        {
+            var left = x + 0.3f + (i * (width - 0.6f) / panels);
+            FacePanelY(left, left + 0.24f, front, 0.14f, deck - 0.14f, Palette.Scale(team, 0.8f));
+        }
+
+        FacePanelX(side, y + 0.25f, y + 0.5f, 0.14f, deck - 0.14f, Palette.Scale(team, 0.7f));
+        FacePanelY(x, x + width, front, deck - 0.09f, deck - 0.03f, team);
+        FacePanelX(side, y, y + depth, deck - 0.09f, deck - 0.03f, team);
+
+        // Lit windows along the upper deck.
+        FacePanelY(upperX + 0.12f, upperX + upperWidth - 0.12f, upperY + upperDepth + 0.006f, height - 0.16f, height - 0.1f, Palette.BaseLight, 0.9f);
+
+        // The banner: hung from the front of the upper deck, the faction's colour with a pale chevron.
+        var bannerX = upperX + upperWidth - 0.34f;
+        var bannerFace = upperY + upperDepth + 0.012f;
+        FacePanelY(bannerX, bannerX + 0.24f, bannerFace, deck - 0.05f, height + 0.08f, team, 0.15f);
+        FacePanelY(bannerX + 0.08f, bannerX + 0.16f, bannerFace + 0.002f, height - 0.18f, height - 0.04f, Palette.Text, 0.3f);
+        batch.Box(bannerX - 0.03f, bannerFace - 0.03f, 0.3f, 0.03f, height + 0.08f, height + 0.11f, Palette.Metal, Palette.Metal);
+
+        // Roof clutter: vents and a faction marker.
+        batch.Box(upperX + 0.12f, upperY + 0.12f, 0.2f, 0.2f, height, height + 0.08f, Palette.Metal, Palette.ConcreteDark);
+        batch.Box(upperX + upperWidth - 0.4f, upperY + 0.12f, 0.26f, 0.26f, height, height + 0.03f, Palette.Scale(team, 0.7f), team);
 
         var center = new Vector2(origin.X + (definition.Width / 2f), origin.Y + (definition.Height / 2f));
         switch (definition.Role)
@@ -486,7 +678,8 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         scene.AddLight(new PointLight(new Vector3(origin.X + definition.Width + 0.3f, origin.Y + definition.Height + 0.3f, 0.9f + batch.Lift), 2.6f, Palette.BaseLight, 0.55f));
     }
 
-    // A Maw nest: an organic mound, taller and more crystal-studded with each tier, glowing from within.
+    // A Maw nest: a spire of black-and-crimson spikes round a glowing core, on a stain of violet creep. Higher tiers
+    // grow taller, ring themselves with more spikes and sprout violet crystal.
     private void PaintNest(StructureDefinition definition, Cell origin, FrameScene scene)
     {
         var tier = definition.Id switch
@@ -496,19 +689,81 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
             _ => 1,
         };
         var center = new Vector2(origin.X + (definition.Width / 2f), origin.Y + (definition.Height / 2f));
-        var height = 0.3f + (0.18f * tier);
-        batch.Disc(center, (definition.Width / 2f) + 0.1f, GroundEpsilon, Palette.WithAlpha(Palette.MawCarapaceDark, 0.9f));
-        batch.Box(origin.X + 0.3f, origin.Y + 0.3f, definition.Width - 0.6f, definition.Height - 0.6f, 0, height, Palette.MawCarapaceDark, Palette.MawCarapace);
-        batch.Box(origin.X + 0.8f, origin.Y + 0.8f, definition.Width - 1.6f, definition.Height - 1.6f, height, height + 0.2f, Palette.MawFlesh, Palette.MawFlesh);
-        batch.Disc(center, 0.35f, height + 0.21f, Palette.MawGlow, emissive: 1f);
-        for (var i = 0; i < tier * 3; i++)
+        var radius = definition.Width / 2f;
+        var seed = Hash(origin.X, origin.Y);
+
+        // The creep: a dark violet stain wider than the nest, veined with brighter channels running out from it.
+        batch.Disc(center, radius + 1.6f, GroundEpsilon * 2, Palette.WithAlpha(Palette.Creep, 0.75f), shape: QuadShape.Glow);
+        batch.Disc(center, radius + 0.7f, GroundEpsilon * 3, Palette.Creep);
+        for (var vein = 0; vein < 7; vein++)
         {
-            var angle = i * 2.4f;
-            var at = center + (new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * (0.7f + (0.25f * (i % 2))));
-            batch.Box(at.X - 0.07f, at.Y - 0.07f, 0.14f, 0.14f, 0.1f, height + 0.15f + (0.1f * (i % 3)), Palette.Scale(Palette.MawGlow, 0.6f), Palette.MawGlow, emissive: 0.7f);
+            var heading = (vein * MathF.Tau / 7f) + (((seed >> (vein * 3)) & 0x7) * 0.09f);
+            var middle = center + (Direction(heading) * (radius + 0.4f));
+            var end = middle + (Direction(heading + ((((seed >> (vein * 2)) & 0x3) - 1.5f) * 0.3f)) * (0.6f + (((seed >> vein) & 0x3) * 0.25f)));
+            Crack(center, middle, 0.05f, GroundEpsilon * 4, Palette.CreepVein, 0.35f);
+            Crack(middle, end, 0.035f, GroundEpsilon * 4, Palette.CreepVein, 0.25f);
         }
 
-        scene.AddLight(new PointLight(new Vector3(center, height + 0.8f + batch.Lift), 2.5f + tier, Palette.MawGlow, 0.9f));
+        // The mound: dark carapace stepping in towards the top.
+        var height = 0.9f + (0.5f * tier);
+        var steps = 4;
+        for (var step = 0; step < steps; step++)
+        {
+            var inset = 0.45f + (step * (radius - 0.75f) / steps);
+            var bottom = step * height * 0.1f;
+            var top = (step + 1) * height * 0.1f;
+            var shade = Palette.Mix(Palette.MawCarapaceDark, Palette.MawCarapace, step / (float)steps * 0.6f);
+            batch.Box(origin.X + inset, origin.Y + inset, definition.Width - (2 * inset), definition.Height - (2 * inset), bottom, top, shade, Palette.Scale(shade, 1.15f));
+        }
+
+        // The core: a hot red eye at the top of the mound, and the central spire rising out of it.
+        var lip = steps * height * 0.1f;
+        batch.Disc(center, 0.42f, lip + 0.01f, Palette.MawGlow, emissive: 1f);
+        batch.Disc(center, 0.9f, lip + 0.02f, Palette.WithAlpha(Palette.MawGlow, 0.35f), emissive: 1f, shape: QuadShape.Glow);
+        Spike(center + new Vector2(0.18f, -0.18f), new Vector2(-0.1f, 0.1f), 0.3f, lip * 0.5f, height + 1.1f, Palette.MawCarapaceDark, Palette.MawCarapace, 0f);
+
+        // A ring of curved spikes leaning out, crimson and black by turns.
+        var count = 5 + (tier * 3);
+        for (var i = 0; i < count; i++)
+        {
+            var angle = (i * MathF.Tau / count) + ((seed >> (i % 8)) & 0x3) * 0.12f;
+            var out_ = Direction(angle);
+            var reach = radius - 0.5f - ((i % 2) * 0.45f);
+            var tall = (height * (0.85f + ((i % 3) * 0.22f))) + (0.15f * tier);
+            var crimson = i % 2 == 0;
+            Spike(center + (out_ * reach), out_ * 0.55f, 0.24f + (0.03f * tier), 0, tall,
+                crimson ? Palette.MawCarapace : Palette.MawCarapaceDark, crimson ? Palette.MawFlesh : Palette.MawCarapace, 0f);
+        }
+
+        // Older nests grow violet crystal from the creep.
+        for (var i = 0; i < (tier - 1) * 4; i++)
+        {
+            var angle = 0.4f + (i * MathF.Tau / ((tier - 1) * 4));
+            var at = center + (Direction(angle) * (radius + 0.25f + ((i % 2) * 0.4f)));
+            Spike(at, Direction(angle) * 0.12f, 0.1f, 0, 0.5f + ((i % 3) * 0.18f), Palette.Scale(Palette.MawViolet, 0.7f), Palette.MawViolet, 0.7f);
+        }
+
+        scene.AddLight(new PointLight(new Vector3(center, lip + 0.7f + batch.Lift), 2.8f + tier, Palette.MawGlow, 1.1f));
+        if (tier > 1)
+        {
+            scene.AddLight(new PointLight(new Vector3(center + new Vector2(radius + 0.4f, radius + 0.4f), 0.6f + batch.Lift), 2.2f, Palette.MawViolet, 0.5f));
+        }
+    }
+
+    // A tapering spike of stacked, shrinking blocks from foot up to top, its tip pushed out by lean.
+    private void Spike(Vector2 foot, Vector2 lean, float width, float bottom, float top, LinearColor sides, LinearColor tip, float emissive)
+    {
+        const int Segments = 4;
+        for (var segment = 0; segment < Segments; segment++)
+        {
+            var t = segment / (float)Segments;
+            var half = width * (1f - (t * 0.8f)) / 2f;
+            var at = foot + (lean * t * t);
+            var z0 = bottom + ((top - bottom) * t);
+            var z1 = bottom + ((top - bottom) * (segment + 1) / Segments);
+            var color = Palette.Mix(sides, tip, t);
+            batch.Box(at.X - half, at.Y - half, half * 2, half * 2, z0, z1, color, Palette.Mix(color, tip, 0.5f), emissive * (0.4f + t));
+        }
     }
 
     private void PaintUnit(UnitDefinition definition, Vector2 position, float heading, float turret, int owner, float cargo)
@@ -609,20 +864,47 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
     private void PaintCrystals(int x, int y, int amount, float ground)
     {
-        // Two or three crystal clusters per cell, brighter and bigger the richer the cell.
+        // Clusters of acid-green shards leaning out of a glowing stain, taller and brighter the richer the cell.
         var richness = Math.Clamp(amount / 500f, 0.15f, 1f);
         var seed = Hash(x, y);
         batch.Begin(x + y + 0.5f, ground);
-        for (var i = 0; i < 3; i++)
+        batch.Disc(new Vector2(x + 0.5f, y + 0.5f), 0.55f + (richness * 0.25f), GroundEpsilon * 2, Palette.WithAlpha(Palette.Cindrite, 0.16f + (richness * 0.14f)),
+            emissive: 0.8f, shape: QuadShape.Glow);
+        var root = new Vector2(x + 0.35f + (((seed >> 20) & 0x7) / 7f * 0.3f), y + 0.35f + (((seed >> 23) & 0x7) / 7f * 0.3f));
+        batch.Disc(root, 0.2f + (richness * 0.12f), GroundEpsilon * 3, Palette.CindriteDeep);
+        var shards = 3 + ((seed >> 3) & 0x1) + (richness > 0.6f ? 1 : 0);
+        for (var i = 0; i < shards; i++)
         {
-            var ox = 0.2f + ((seed >> (i * 4) & 0xF) / 15f * 0.6f);
-            var oy = 0.2f + ((seed >> ((i * 4) + 12) & 0xF) / 15f * 0.6f);
-            var size = (0.08f + ((seed >> (i * 3) & 0x7) / 7f * 0.08f)) * (0.6f + (richness * 0.6f));
-            var color = Palette.Mix(Palette.Cindrite, Palette.CindriteHot, ((seed >> (i * 5)) & 0x3) / 3f * 0.5f);
-            batch.Box(x + ox - size, y + oy - size, size * 2, size * 2, 0, size * 2.4f, Palette.Scale(color, 0.7f), color, emissive: 0.55f + (0.35f * richness));
+            // The first shard stands tall in the middle; the rest lean out round it.
+            var angle = ((seed >> (i * 3)) & 0x7) / 8f * MathF.Tau + (i * 2.1f);
+            var lean = i == 0 ? Vector2.Zero : Direction(angle) * (0.14f + (((seed >> (i * 4)) & 0x3) * 0.04f));
+            var foot = root + (i == 0 ? Vector2.Zero : Direction(angle) * 0.1f);
+            var width = (0.11f + (((seed >> (i * 3)) & 0x7) / 7f * 0.06f)) * (0.75f + (richness * 0.4f)) * (i == 0 ? 1.25f : 1f);
+            var height = (i == 0 ? 0.55f : 0.26f + (((seed >> ((i * 2) + 7)) & 0x7) / 7f * 0.22f)) * (0.55f + (richness * 0.65f));
+            var body = Palette.Mix(Palette.CindriteDeep, Palette.Cindrite, 0.55f + (((seed >> (i * 5)) & 0x3) / 3f * 0.45f));
+            Spike(foot, lean, width, 0, height, body, Palette.CindriteHot, 0.2f + (0.25f * richness));
         }
 
         batch.End();
+    }
+
+    /// <summary>Green light thrown by the richest Cindrite on screen (one light per few cells, so fields glow without using up every light).</summary>
+    public void LightCindrite(GameSimulation simulation, IsoCamera camera, FrameScene scene)
+    {
+        var map = simulation.Map;
+        var (minX, minY, maxX, maxY) = VisibleCells(camera, map);
+        for (var y = minY - (minY % 3); y <= maxY; y += 3)
+        {
+            for (var x = minX - (minX % 3); x <= maxX; x += 3)
+            {
+                var cell = new Cell(x + 1, y + 1);
+                if (map.InBounds(cell) && map.CindriteAt(cell) > 150 && fog.At(cell.X, cell.Y) > 0f)
+                {
+                    var ground = GroundHeight(map, cell.X + 0.5f, cell.Y + 0.5f);
+                    scene.AddLight(new PointLight(new Vector3(cell.X + 0.5f, cell.Y + 0.5f, ground + 0.6f), 2.6f, Palette.Cindrite, 0.45f));
+                }
+            }
+        }
     }
 
     private static (int MinX, int MinY, int MaxX, int MaxY) VisibleCells(IsoCamera camera, GridMap map)
