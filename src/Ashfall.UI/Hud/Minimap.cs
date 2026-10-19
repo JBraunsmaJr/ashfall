@@ -62,6 +62,11 @@ internal static class Minimap
         var dot = Math.Max(2f, cell * 1.2f);
         foreach (var index in world.Store<UnitInfo>().EntityIndices)
         {
+            if (simulation.IsSheltered(world.EntityAt(index)))
+            {
+                continue;
+            }
+
             var position = MotionTracker.ToVector(world.Store<Position>().Get(index).Value);
             var owner = world.Store<Owner>().Get(index).PlayerId;
             if (owner != player && fog.Sample(position.X, position.Y) < 0.75f)

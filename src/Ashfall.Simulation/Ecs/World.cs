@@ -125,6 +125,14 @@ public sealed class World
         Store<T>().Set(entity.Index, component);
     }
 
+    /// <summary>Takes a component off a live entity (nothing happens if it has none).</summary>
+    public void Remove<T>(Entity entity)
+        where T : unmanaged, IStateHashable
+    {
+        EnsureAlive(entity);
+        Store<T>().Remove(entity.Index);
+    }
+
     public bool Has<T>(Entity entity)
         where T : unmanaged, IStateHashable =>
         IsAlive(entity) && Store<T>().Has(entity.Index);

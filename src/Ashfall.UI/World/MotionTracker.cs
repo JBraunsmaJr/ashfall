@@ -46,6 +46,20 @@ internal sealed class MotionTracker
         {
             var entity = world.EntityAt(index);
             var armament = armaments.Get(index);
+            if (world.Store<StructureInfo>().Has(index))
+            {
+                // A guard tower: shots from its middle.
+                var tower = simulation.WeaponOf(entity);
+                if (tower is not null && !armament.Target.IsNone && world.IsAlive(armament.Target) && armament.Cooldown == tower.CooldownTicks)
+                {
+                    var from = ToVector(world.Store<Position>().Get(index).Value);
+                    var at = ToVector(simulation.ClosestPointOf(armament.Target, world.Store<Position>().Get(index).Value));
+                    Shots.Add(new ShotEvent(entity, from, at, tower.Warhead, world.Store<Owner>().Get(index).PlayerId, ToFloat(tower.SplashRadius)));
+                }
+
+                continue;
+            }
+
             if (!_tracks.TryGetValue(entity, out var track) || armament.Target.IsNone || !world.IsAlive(armament.Target))
             {
                 if (_tracks.TryGetValue(entity, out track))
@@ -62,7 +76,7 @@ internal sealed class MotionTracker
             var turret = toTarget.LengthSquared() > 1e-6f ? MathF.Atan2(toTarget.Y, toTarget.X) : track.TurretHeading;
             _tracks[entity] = track with { TurretHeading = turret, Aiming = true };
 
-            var weapon = simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType).Weapon;
+            var weapon = simulation.WeaponOf(entity);
             if (weapon is not null && armament.Cooldown == weapon.CooldownTicks)
             {
                 Shots.Add(new ShotEvent(entity, shooter, aim, weapon.Warhead, world.Store<Owner>().Get(index).PlayerId, ToFloat(weapon.SplashRadius)));

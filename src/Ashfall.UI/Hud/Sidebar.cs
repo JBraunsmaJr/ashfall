@@ -55,12 +55,26 @@ public sealed class Sidebar
     /// <summary>Whether every selected structure is being repaired already. Set by the screen.</summary>
     public bool RepairOn { get; set; }
 
-    /// <summary>Where the repair button sits: the stance row's place, full width.</summary>
+    /// <summary>Whether the unload button shows beside repair (a selected bunker has people in it). Set by the screen.</summary>
+    public bool ShowUnload { get; set; }
+
+    /// <summary>Where the repair button sits: the stance row's place, full width (half when unload shows too).</summary>
     public (float X, float Y, float Width, float Height) RepairRect()
     {
         var (_, y, _, height) = StanceRect(UnitStance.Guard);
-        return (Layout.X + Layout.Padding, y, Layout.Width - (2 * Layout.Padding), height);
+        var width = Layout.Width - (2 * Layout.Padding);
+        return (Layout.X + Layout.Padding, y, ShowUnload ? (width / 2f) - (2 * Layout.Scale) : width, height);
     }
+
+    /// <summary>Where the unload button sits: the right half of the row.</summary>
+    public (float X, float Y, float Width, float Height) UnloadRect()
+    {
+        var (x, y, width, height) = RepairRect();
+        return (x + width + (4 * Layout.Scale), y, width, height);
+    }
+
+    /// <summary>True when <paramref name="point"/> is on the unload button and it shows.</summary>
+    public bool HitUnload(Vector2 point) => ShowRepair && ShowUnload && Inside(point, UnloadRect());
 
     /// <summary>True when <paramref name="point"/> is on the repair button and it shows.</summary>
     public bool HitRepair(Vector2 point) => ShowRepair && Inside(point, RepairRect());
@@ -80,6 +94,13 @@ public sealed class Sidebar
         if (RepairOn)
         {
             canvas.Frame(x, y, width, height, layout.Scale, Palette.TextGood);
+        }
+
+        if (ShowUnload)
+        {
+            var (ux, uy, uw, uh) = UnloadRect();
+            canvas.Rect(ux, uy, uw, uh, Inside(mouse, (ux, uy, uw, uh)) ? Palette.ButtonHover : Palette.Button);
+            canvas.TextCentered(ux + (uw / 2f), uy + ((uh - (PixelFont.GlyphHeight * layout.Scale)) / 2f), "UNLOAD (U)", layout.Scale, Palette.Text);
         }
     }
 
@@ -496,7 +517,7 @@ public sealed class Sidebar
             var structure = content.Structure(index);
             if (structure.Role != StructureRole.ConstructionYard)
             {
-                var tab = structure.Role == StructureRole.Wall ? SidebarTab.Defence : SidebarTab.Base;
+                var tab = structure.Role is StructureRole.Wall or StructureRole.Defence ? SidebarTab.Defence : SidebarTab.Base;
                 _entries.Add(new SidebarEntry(true, index, id, ShortName(structure.Name), structure.Name, structure.Cost, tab));
             }
         }

@@ -41,6 +41,12 @@ public readonly record struct Command(
     public static Command Train(int playerId, Entity producer, int unitType) =>
         new(playerId, CommandKind.Train, producer, FixVec2.Zero, Entity.None, unitType, default);
 
+    public static Command Enter(int playerId, Entity unit, Entity bunker) =>
+        new(playerId, CommandKind.Enter, unit, FixVec2.Zero, bunker, -1, default);
+
+    public static Command Unload(int playerId, Entity bunker) =>
+        new(playerId, CommandKind.Unload, bunker, FixVec2.Zero, Entity.None, -1, default);
+
     public static Command Repair(int playerId, Entity structure, bool on) =>
         new(playerId, CommandKind.Repair, structure, FixVec2.Zero, Entity.None, on ? 1 : 0, default);
 

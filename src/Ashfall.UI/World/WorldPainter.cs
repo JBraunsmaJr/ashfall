@@ -186,7 +186,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
             var progress = info.IsComplete ? 1f : 1f - (info.BuildRemaining / (float)definition.BuildTicks);
             batch.Begin(info.Origin.X + definition.Width + info.Origin.Y + definition.Height - 1, GroundHeight(simulation.Map, centerX, centerY));
-            PaintStructure(definition, info.Origin, owner, progress, scene);
+            PaintStructure(simulation, definition, info.Origin, owner, progress, scene);
             if (selected.Contains(entity))
             {
                 batch.Outline(info.Origin.X - 0.05f, info.Origin.Y - 0.05f, definition.Width + 0.1f, definition.Height + 0.1f, 0.08f, GroundEpsilon * 3, Palette.Selection);
@@ -205,9 +205,9 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
             var owner = world.Store<Owner>().Get(index).PlayerId;
             var fallback = MotionTracker.ToVector(world.Store<Position>().Get(index).Value);
             var position = motion.PositionOf(entity, fallback, alpha);
-            if (owner != localPlayer && fog.Sample(position.X, position.Y) < 0.75f)
+            if ((owner != localPlayer && fog.Sample(position.X, position.Y) < 0.75f) || simulation.IsSheltered(entity))
             {
-                continue; // enemies are only seen inside current vision
+                continue; // enemies are only seen inside current vision; units in a bunker are inside it
             }
 
             var definition = simulation.Content.Unit(world.Store<UnitInfo>().Get(index).UnitType);
@@ -319,6 +319,7 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
     public static float StructureHeight(StructureRole role) => role switch
     {
+        StructureRole.Defence => 0.5f,
         StructureRole.ConstructionYard => 1.0f,
         StructureRole.PowerPlant => 0.7f,
         StructureRole.Refinery => 0.75f,
@@ -327,7 +328,28 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
         _ => 0.7f,
     };
 
-    private void PaintStructure(StructureDefinition definition, Cell origin, int owner, float progress, FrameScene scene)
+    // Which way a guard tower's guns point: at its target, or south-east at rest.
+    private static float TowerAim(GameSimulation simulation, Cell origin)
+    {
+        var world = simulation.World;
+        var tower = world.EntityAt(simulation.Map.StructureAt(origin));
+        if (tower.IsNone || !world.Has<Armament>(tower) || world.Get<Armament>(tower).Target is var target && (target.IsNone || !world.IsAlive(target)))
+        {
+            return MathF.PI / 4f;
+        }
+
+        var from = MotionTracker.ToVector(world.Get<Position>(tower).Value);
+        var to = MotionTracker.ToVector(world.Get<Position>(world.Get<Armament>(tower).Target).Value);
+        return MathF.Atan2(to.Y - from.Y, to.X - from.X);
+    }
+
+    private static int OccupantsAt(GameSimulation simulation, Cell origin)
+    {
+        var bunker = simulation.World.EntityAt(simulation.Map.StructureAt(origin));
+        return bunker.IsNone ? 0 : simulation.OccupantsOf(bunker);
+    }
+
+    private void PaintStructure(GameSimulation simulation, StructureDefinition definition, Cell origin, int owner, float progress, FrameScene scene)
     {
         if (definition.Role == StructureRole.Nest)
         {
@@ -408,6 +430,33 @@ internal sealed class WorldPainter(WorldBatch batch, FogField fog, MotionTracker
 
             case StructureRole.Barracks:
                 batch.Box(x + 0.3f, y + depth - 0.1f, width - 0.6f, 0.1f, 0.06f, height * 0.7f, Palette.Metal, Palette.Metal);
+                break;
+
+            case StructureRole.Defence when definition.Weapon is not null:
+                // A guard tower: a post with a gun housing that turns toward whatever it shoots at.
+                batch.Box(x + 0.15f, y + 0.15f, width - 0.3f, depth - 0.3f, height, height + 0.35f, Palette.ConcreteDark, Palette.Concrete);
+                var aim = TowerAim(simulation, origin);
+                var gun = new Vector2(center.X, center.Y);
+                batch.RotatedBox(gun, 0.5f, 0.4f, aim, height + 0.35f, height + 0.6f, Palette.Scale(team, 0.7f), team);
+                batch.RotatedBox(gun + (new Vector2(MathF.Cos(aim), MathF.Sin(aim)) * 0.35f), 0.4f, 0.08f, aim, height + 0.45f, height + 0.52f, Palette.Metal, Palette.Metal);
+                break;
+
+            case StructureRole.Defence:
+                // A bunker: a squat block with a dark firing slit and a pip on the roof per occupant.
+                batch.Quad(
+                    new Vector3(x + 0.2f, y + depth + 0.01f, height - 0.3f),
+                    new Vector3(x + width - 0.2f, y + depth + 0.01f, height - 0.3f),
+                    new Vector3(x + width - 0.2f, y + depth + 0.01f, height - 0.18f),
+                    new Vector3(x + 0.2f, y + depth + 0.01f, height - 0.18f),
+                    Vector3.UnitY,
+                    Palette.FissureDepth);
+                var occupants = OccupantsAt(simulation, origin);
+                for (var pip = 0; pip < definition.Garrison; pip++)
+                {
+                    var color = pip < occupants ? Palette.TextGood : Palette.ConcreteDark;
+                    batch.Box(x + 0.25f + (pip * 0.32f), y + 0.25f, 0.2f, 0.2f, height, height + 0.06f, color, color, emissive: pip < occupants ? 0.6f : 0f);
+                }
+
                 break;
 
             case StructureRole.RepairBay:

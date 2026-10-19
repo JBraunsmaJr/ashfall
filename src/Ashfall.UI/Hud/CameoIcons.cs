@@ -109,6 +109,19 @@ public static class CameoIcons
                 icon.Oval(0.5f, 0.3f, 0.04f, 0.04f, Palette.TextGood, glow: true);
                 break;
 
+            case BulwarkContent.GuardTower:
+                icon.Box(0.4f, 0.4f, 0.2f, 0.4f, Palette.ConcreteDark);
+                icon.Box(0.34f, 0.28f, 0.32f, 0.14f, team);
+                icon.Line(0.6f, 0.34f, 0.84f, 0.3f, 0.035f, Palette.Metal);
+                icon.Line(0.6f, 0.38f, 0.84f, 0.36f, 0.035f, Palette.Metal);
+                break;
+
+            case BulwarkContent.Bunker:
+                icon.Box(0.16f, 0.48f, 0.68f, 0.32f, Palette.Concrete);
+                icon.Fill(0.24f, 0.58f, 0.52f, 0.05f, Palette.FissureDepth);
+                icon.Fill(0.16f, 0.48f, 0.68f, 0.04f, team);
+                break;
+
             case BulwarkContent.Warden:
                 icon.Box(0.16f, 0.62f, 0.68f, 0.14f, Palette.Metal);
                 icon.Box(0.2f, 0.5f, 0.6f, 0.14f, team);

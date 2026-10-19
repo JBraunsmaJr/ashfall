@@ -147,6 +147,17 @@ public sealed class GameContent
             hasher.Add(structure.Power);
             hasher.Add(structure.Sight);
             hasher.Add(structure.FreeUnitId);
+            hasher.Add(structure.Garrison);
+            hasher.Add(structure.Weapon is not null);
+            if (structure.Weapon is { } turret)
+            {
+                hasher.Add(turret.Id);
+                hasher.Add((int)turret.Warhead);
+                hasher.Add(turret.Damage);
+                hasher.Add(turret.Range);
+                hasher.Add(turret.CooldownTicks);
+                hasher.Add(turret.SplashRadius);
+            }
             hasher.Add(structure.Prerequisites.Count);
             foreach (var role in structure.Prerequisites)
             {
@@ -281,9 +292,9 @@ public sealed class GameContent
                 throw new InvalidOperationException($"Structure '{structure.Id}' has an empty footprint or no health.");
             }
 
-            if (structure.Sight < 0)
+            if (structure.Sight < 0 || structure.Garrison < 0)
             {
-                throw new InvalidOperationException($"Structure '{structure.Id}' has a negative sight range.");
+                throw new InvalidOperationException($"Structure '{structure.Id}' has a negative sight range or garrison.");
             }
 
             if (structure.FreeUnitId is not null)

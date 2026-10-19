@@ -104,6 +104,7 @@ public sealed class GameSimulation
         World.Register<Producer>();
         World.Register<Creature>();
         World.Register<Nest>();
+        World.Register<Garrisoned>();
 
         // System order is fixed and identical on every peer.
         _systems =
@@ -119,6 +120,7 @@ public sealed class GameSimulation
             new NestSystem(),
             new TargetingSystem(),
             new MovementSystem(),
+            new GarrisonSystem(),
             new SwarmSystem(),
             new WeaponSystem(),
             new DeathSystem(),
@@ -309,6 +311,11 @@ public sealed class GameSimulation
         if (definition.Role is StructureRole.Barracks or StructureRole.Factory)
         {
             World.Add(structure, new Producer());
+        }
+
+        if (definition.Weapon is not null)
+        {
+            World.Add(structure, new Armament(0, Entity.None) { Stance = UnitStance.HoldGround });
         }
 
         Map.SetStructure(origin, definition.Width, definition.Height, structure.Index);
@@ -516,15 +523,93 @@ public sealed class GameSimulation
         CommandKind.SetStance => ApplySetStance(command),
         CommandKind.SetRally => ApplySetRally(command),
         CommandKind.Repair => ApplyRepair(command),
+        CommandKind.Enter => ApplyEnter(command),
+        CommandKind.Unload => ApplyUnload(command),
         CommandKind.None => false,
         _ => false,
     };
 
+    // A live unit of the player's that can take orders (not one sheltering in a bunker).
     private bool OwnsLiveUnit(in Command command) =>
         World.IsAlive(command.Unit)
         && World.Has<Owner>(command.Unit)
         && World.Get<Owner>(command.Unit).PlayerId == command.PlayerId
-        && World.Has<Mover>(command.Unit);
+        && World.Has<Mover>(command.Unit)
+        && !World.Has<Garrisoned>(command.Unit);
+
+    /// <summary>The gun an armed unit or turret fires, or null.</summary>
+    public WeaponDefinition? WeaponOf(Entity entity) =>
+        World.Has<UnitInfo>(entity) ? Content.Unit(World.Get<UnitInfo>(entity).UnitType).Weapon
+        : World.Has<StructureInfo>(entity) ? Content.Structure(World.Get<StructureInfo>(entity).StructureType).Weapon
+        : null;
+
+    /// <summary>
+    /// How far an armed unit or turret reaches: its weapon's range, and from inside a bunker that from the bunker's
+    /// walls plus <see cref="Systems.GarrisonSystem.RangeBonus"/>.
+    /// </summary>
+    public Fix64 ReachOf(Entity entity)
+    {
+        var weapon = WeaponOf(entity);
+        if (weapon is null)
+        {
+            return Fix64.Zero;
+        }
+
+        if (!World.Has<Garrisoned>(entity))
+        {
+            return weapon.Range;
+        }
+
+        var bunker = World.Get<Garrisoned>(entity).Bunker;
+        var definition = Content.Structure(World.Get<StructureInfo>(bunker).StructureType);
+        var half = Fix64.FromRatio(definition.Width > definition.Height ? definition.Width : definition.Height, 2);
+        return weapon.Range + half + Systems.GarrisonSystem.RangeBonus;
+    }
+
+    /// <summary>True for a unit sheltering in a bunker: it cannot be seen, targeted or hit.</summary>
+    public bool IsSheltered(Entity entity) => World.Has<Garrisoned>(entity);
+
+    /// <summary>How many units shelter in <paramref name="bunker"/>.</summary>
+    public int OccupantsOf(Entity bunker)
+    {
+        var count = 0;
+        foreach (var occupant in World.Store<Garrisoned>().Components)
+        {
+            count += occupant.Bunker == bunker ? 1 : 0;
+        }
+
+        return count;
+    }
+
+    /// <summary>Puts everyone sheltering in <paramref name="bunker"/> back outside its door, idle.</summary>
+    public void EjectGarrison(Entity bunker)
+    {
+        var garrison = World.Store<Garrisoned>();
+        var leaving = new List<int>();
+        foreach (var index in garrison.EntityIndices)
+        {
+            if (garrison.Get(index).Bunker == bunker)
+            {
+                leaving.Add(index);
+            }
+        }
+
+        var info = World.Get<StructureInfo>(bunker);
+        var door = ExitCell(info);
+        for (var i = 0; i < leaving.Count; i++)
+        {
+            var unit = World.EntityAt(leaving[i]);
+            World.Remove<Garrisoned>(unit);
+            var spot = Navigator.TryFindNearestPassable(door, maxRadius: 4, out var free) ? free : door;
+            var offset = new FixVec2(Fix64.FromRatio((i % 2 * 2) - 1, 4), Fix64.FromRatio((i / 2 % 2 * 2) - 1, 4));
+            World.Get<Position>(unit).Value = Bounds.Clamp(spot.Center + offset);
+            World.Get<UnitOrder>(unit) = UnitOrder.Idle;
+            if (World.Has<Armament>(unit))
+            {
+                World.Get<Armament>(unit).Target = Entity.None;
+            }
+        }
+    }
 
     private bool ApplyMove(in Command command)
     {
@@ -562,6 +647,7 @@ public sealed class GameSimulation
             || !World.Has<Armament>(command.Unit)
             || !World.IsAlive(command.TargetEntity)
             || !World.Has<Health>(command.TargetEntity)
+            || World.Has<Garrisoned>(command.TargetEntity)
             || !AreEnemies(command.PlayerId, World.Get<Owner>(command.TargetEntity).PlayerId))
         {
             return false;
@@ -666,6 +752,42 @@ public sealed class GameSimulation
         Navigator.PlanRoute(unit.Index, World.Get<Position>(unit).Value, point, ref mover);
     }
 
+    private bool ApplyEnter(in Command command)
+    {
+        if (!OwnsLiveUnit(command)
+            || !World.Has<UnitInfo>(command.Unit)
+            || !Content.Unit(World.Get<UnitInfo>(command.Unit).UnitType).IsInfantry
+            || !IsBunkerOf(command.TargetEntity, command.PlayerId))
+        {
+            return false;
+        }
+
+        SetOrder(command.Unit, new UnitOrder(OrderKind.Enter, command.TargetEntity, FixVec2.Zero));
+        ref var mover = ref World.Get<Mover>(command.Unit);
+        var door = ExitCell(World.Get<StructureInfo>(command.TargetEntity)).Center;
+        Navigator.PlanRoute(command.Unit.Index, World.Get<Position>(command.Unit).Value, door, ref mover);
+        return true;
+    }
+
+    private bool ApplyUnload(in Command command)
+    {
+        if (!IsBunkerOf(command.Unit, command.PlayerId))
+        {
+            return false;
+        }
+
+        EjectGarrison(command.Unit);
+        return true;
+    }
+
+    /// <summary>True when <paramref name="bunker"/> is a live, finished structure of the player's that can shelter infantry.</summary>
+    public bool IsBunkerOf(Entity bunker, int playerId) =>
+        World.IsAlive(bunker)
+        && World.Has<StructureInfo>(bunker)
+        && World.Get<Owner>(bunker).PlayerId == playerId
+        && World.Get<StructureInfo>(bunker).IsComplete
+        && Content.Structure(World.Get<StructureInfo>(bunker).StructureType).Garrison > 0;
+
     private bool ApplyRepair(in Command command)
     {
         if (!World.IsAlive(command.Unit)
@@ -754,7 +876,7 @@ public sealed class GameSimulation
         for (var i = 0; i < infos.Length; i++)
         {
             var other = Content.Structure(infos[i].StructureType);
-            if (owners.Get(indices[i]).PlayerId != playerId || other.Role == StructureRole.Wall)
+            if (owners.Get(indices[i]).PlayerId != playerId || other.Role is StructureRole.Wall or StructureRole.Defence)
             {
                 continue; // walls hold a line; they do not stretch the base
             }

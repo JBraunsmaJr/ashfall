@@ -398,6 +398,7 @@ public sealed class SwarmSystem : ISystem
             && world.IsAlive(target)
             && world.Has<Health>(target)
             && !world.Get<Health>(target).IsDead
+            && !world.Has<Garrisoned>(target)
             && simulation.AreEnemies(GameSimulation.MawPlayerId, world.Get<Owner>(target).PlayerId);
     }
 

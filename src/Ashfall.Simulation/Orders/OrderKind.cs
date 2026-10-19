@@ -14,4 +14,7 @@ public enum OrderKind : byte
 
     /// <summary>Go to a point, engaging enemies met on the way.</summary>
     AttackMove = 3,
+
+    /// <summary>Walk to a bunker (<see cref="Components.UnitOrder.Target"/>) and take shelter in it.</summary>
+    Enter = 4,
 }

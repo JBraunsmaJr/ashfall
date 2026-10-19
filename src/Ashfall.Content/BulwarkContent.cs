@@ -18,6 +18,8 @@ public static class BulwarkContent
     public const string Factory = "bulwark.factory";
     public const string Wall = "bulwark.wall";
     public const string RepairBay = "bulwark.repair_bay";
+    public const string GuardTower = "bulwark.guard_tower";
+    public const string Bunker = "bulwark.bunker";
 
     public const string Rifleman = "bulwark.rifleman";
     public const string Rocketeer = "bulwark.rocketeer";
@@ -31,6 +33,9 @@ public static class BulwarkContent
         var rifle = new WeaponDefinition("bulwark.rifle", Warhead.SmallArms, Damage: 15, Range: Fix64.FromInt(4), CooldownTicks: 15);
         var rocket = new WeaponDefinition("bulwark.rocket", Warhead.AntiArmour, Damage: 45, Range: Fix64.FromInt(5), CooldownTicks: 45);
         var cannon = new WeaponDefinition("bulwark.cannon", Warhead.AntiArmour, Damage: 40, Range: Fix64.FromInt(5), CooldownTicks: 30);
+
+        // The guard tower's twin machine guns: chaff-shredding, outranging every creature but the Spitter.
+        var towerGuns = new WeaponDefinition("bulwark.tower_guns", Warhead.SmallArms, Damage: 14, Range: Fix64.FromInt(6), CooldownTicks: 8);
 
         // Short, fast and wide: each burst scorches everything within a cell of its target. The answer to chaff.
         var flamer = new WeaponDefinition("bulwark.flamer", Warhead.Flame, Damage: 10, Range: Fix64.FromInt(3), CooldownTicks: 9,
@@ -80,12 +85,19 @@ public static class BulwarkContent
             // Vehicles parked beside it are mended for credits.
             new(RepairBay, "Repair Bay", StructureRole.RepairBay, Cost: 800, BuildTicks: 240, Health: 800,
                 Width: 3, Height: 3, Power: -30, Prerequisites: [StructureRole.Factory]),
+
+            // Defences. A tower fires on its own; a bunker shelters four infantry, who fire out a cell further than
+            // they could standing in the open and cannot be hit until it falls.
+            new(GuardTower, "Guard Tower", StructureRole.Defence, Cost: 500, BuildTicks: 180, Health: 900,
+                Width: 1, Height: 1, Power: -10, Prerequisites: [StructureRole.Barracks], Sight: 7, Weapon: towerGuns),
+            new(Bunker, "Bunker", StructureRole.Defence, Cost: 400, BuildTicks: 150, Health: 1_400,
+                Width: 2, Height: 2, Power: 0, Prerequisites: [StructureRole.Barracks], Sight: 6, Garrison: 4),
         ];
 
         FactionDefinition[] factions =
         [
             new(FactionId, "Bulwark Directorate", ConstructionYard,
-                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory, Wall, RepairBay],
+                StructureIds: [ConstructionYard, PowerPlant, Refinery, Barracks, Factory, Wall, RepairBay, GuardTower, Bunker],
                 UnitIds: [Rifleman, Rocketeer, Warden, Harvester, Pyro, Medic]),
         ];
 

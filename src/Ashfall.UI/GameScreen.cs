@@ -346,6 +346,11 @@ public sealed class GameScreen
             ToggleRepair();
         }
 
+        if (input.WasPressed(Key.U))
+        {
+            Unload();
+        }
+
         if (input.WasPressed(Key.G) && HasArmedSelection())
         {
             // Cycles guard, hold ground, free (from the selection's stance, or guard when it is mixed).
@@ -489,6 +494,12 @@ public sealed class GameScreen
             return;
         }
 
+        if (_sidebar.HitUnload(input.Mouse))
+        {
+            Unload();
+            return;
+        }
+
         if (_sidebar.HitStance(input.Mouse) is { } stance)
         {
             SetStance(stance);
@@ -608,6 +619,10 @@ public sealed class GameScreen
             {
                 IssueAttack(target);
             }
+            else if (!target.IsNone && Simulation.IsBunkerOf(target, Player) && TryEnter(target))
+            {
+                // Infantry go in; anything else selected walks up to it.
+            }
             else
             {
                 IssueMove(PickGround(input.Mouse), attackMove: false);
@@ -619,6 +634,26 @@ public sealed class GameScreen
 
     // The terrain point under the cursor, allowing for high ground.
     private Vector2 PickGround(Vector2 mouse) => Camera.PickGround(mouse, (x, y) => WorldPainter.GroundHeight(Simulation.Map, x, y));
+
+    // Sends the selected infantry into a bunker (and the rest of the selection to its door). False if none is infantry.
+    private bool TryEnter(Entity bunker)
+    {
+        var infantry = MovableSelection().Where(unit =>
+            Simulation.World.Has<UnitInfo>(unit) && Simulation.Content.Unit(Simulation.World.Get<UnitInfo>(unit).UnitType).IsInfantry).ToList();
+        if (infantry.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var unit in infantry)
+        {
+            _orders!.Enqueue(Command.Enter(Player, unit, bunker));
+        }
+
+        var door = Simulation.ExitCell(Simulation.World.Get<StructureInfo>(bunker));
+        _effects.Marker(new Vector2(door.X + 0.5f, door.Y + 0.5f), attack: false, _now);
+        return true;
+    }
 
     private void IssueAttack(Entity target)
     {
@@ -712,7 +747,7 @@ public sealed class GameScreen
         _scratch.Clear();
         foreach (var index in world.Store<UnitInfo>().EntityIndices)
         {
-            if (world.Store<Owner>().Get(index).PlayerId != Player)
+            if (world.Store<Owner>().Get(index).PlayerId != Player || Simulation.IsSheltered(world.EntityAt(index)))
             {
                 continue;
             }
@@ -746,7 +781,7 @@ public sealed class GameScreen
             var entity = world.EntityAt(index);
             var owner = world.Store<Owner>().Get(index).PlayerId;
             var position = _motion.PositionOf(entity, MotionTracker.ToVector(world.Store<Position>().Get(index).Value), 1f);
-            if (owner != Player && _fog.Sample(position.X, position.Y) < 0.75f)
+            if ((owner != Player && _fog.Sample(position.X, position.Y) < 0.75f) || Simulation.IsSheltered(entity))
             {
                 continue;
             }
@@ -1048,8 +1083,8 @@ public sealed class GameScreen
         // Help and status, bottom-left of the view.
         var scale = _sidebar.Layout.Scale;
         var help = Networked
-            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR"
-            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR  +/- SPEED  P PAUSE";
+            ? "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR  U UNLOAD"
+            : "WASD PAN  RMB MOVE/ATTACK  Q ATTACK-MOVE  X STOP  G STANCE  CTRL+0-9 GROUP  H HOME  TAB BUILD TABS  R REPAIR  U UNLOAD  +/- SPEED  P PAUSE";
         canvas.TextShadowed(8 * scale, _framebuffer.Y - (14 * scale), help, scale, Palette.TextDim);
         var tick = Simulation.Tick;
         var clock = TimeSpan.FromSeconds(tick / (double)SimulationConstants.TicksPerSecond);
@@ -1278,9 +1313,9 @@ public sealed class GameScreen
     private void PruneSelection()
     {
         var world = Simulation.World;
-        if (_selection.RemoveAll(entity => !world.IsAlive(entity)) > 0)
+        if (_selection.RemoveAll(entity => !world.IsAlive(entity) || Simulation.IsSheltered(entity)) > 0)
         {
-            _selectedSet.RemoveWhere(entity => !world.IsAlive(entity));
+            _selectedSet.RemoveWhere(entity => !world.IsAlive(entity) || Simulation.IsSheltered(entity));
         }
     }
 
@@ -1343,6 +1378,24 @@ public sealed class GameScreen
         var structures = SelectedStructures().ToList();
         _sidebar.ShowRepair = _orders is not null && !_sidebar.ShowStances && structures.Count > 0;
         _sidebar.RepairOn = structures.Count > 0 && structures.All(entity => Simulation.World.Get<StructureInfo>(entity).Repairing);
+        _sidebar.ShowUnload = _sidebar.ShowRepair && structures.Any(entity => Simulation.OccupantsOf(entity) > 0);
+    }
+
+    // Everyone out of the selected bunkers.
+    private void Unload()
+    {
+        var bunkers = SelectedStructures().Where(entity => Simulation.OccupantsOf(entity) > 0).ToList();
+        if (_orders is null || bunkers.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var bunker in bunkers)
+        {
+            _orders.Enqueue(Command.Unload(Player, bunker));
+        }
+
+        Say("UNLOADING", Palette.Text);
     }
 
     // The player's own finished structures in the selection.

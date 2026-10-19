@@ -33,9 +33,9 @@ public sealed class WeaponSystem : ISystem
             }
 
             var unit = world.EntityAt(indices[i]);
-            var weapon = context.Content.Unit(world.Get<UnitInfo>(unit).UnitType).Weapon!;
+            var weapon = context.Simulation.WeaponOf(unit)!;
             var position = world.Get<Position>(unit).Value;
-            if (!TargetingSystem.InRange(position, context.Simulation.ClosestPointOf(target, position), weapon.Range))
+            if (!TargetingSystem.InRange(position, context.Simulation.ClosestPointOf(target, position), context.Simulation.ReachOf(unit)))
             {
                 continue;
             }

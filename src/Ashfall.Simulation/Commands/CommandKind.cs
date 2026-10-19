@@ -31,4 +31,10 @@ public enum CommandKind : byte
 
     /// <summary>Start (<see cref="Command.TypeIndex"/> 1) or stop (0) repairing a structure.</summary>
     Repair = 9,
+
+    /// <summary>Send an infantry unit into a bunker (<see cref="Command.TargetEntity"/>).</summary>
+    Enter = 10,
+
+    /// <summary>Put everyone sheltering in a bunker (<see cref="Command.Unit"/>) back outside.</summary>
+    Unload = 11,
 }

@@ -48,6 +48,7 @@ public sealed class SpatialGrid
         ArgumentNullException.ThrowIfNull(world);
         var healths = world.Store<Health>();
         var structures = world.Store<StructureInfo>();
+        var garrisoned = world.Store<Garrisoned>();
         var positions = world.Store<Position>();
         var indices = healths.EntityIndices;
 
@@ -56,9 +57,9 @@ public sealed class SpatialGrid
         for (var i = 0; i < indices.Length; i++)
         {
             var index = indices[i];
-            if (structures.Has(index))
+            if (structures.Has(index) || garrisoned.Has(index))
             {
-                continue;
+                continue; // structures are looked up on the map; units in a bunker cannot be seen or hit
             }
 
             _cellStart[CellIndexOf(positions.Get(index).Value) + 1]++;
@@ -79,7 +80,7 @@ public sealed class SpatialGrid
         for (var i = 0; i < indices.Length; i++)
         {
             var index = indices[i];
-            if (structures.Has(index))
+            if (structures.Has(index) || garrisoned.Has(index))
             {
                 continue;
             }

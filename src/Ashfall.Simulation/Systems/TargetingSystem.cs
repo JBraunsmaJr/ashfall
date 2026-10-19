@@ -44,6 +44,13 @@ public sealed class TargetingSystem : ISystem
         {
             var unit = world.EntityAt(indices[i]);
             ref var armament = ref weapons[i];
+            if (world.Has<StructureInfo>(unit) || world.Has<Garrisoned>(unit))
+            {
+                // Turrets and units in bunkers never move: they fire at what comes within reach.
+                FireAtWill(context, unit, ref armament);
+                continue;
+            }
+
             ref var order = ref world.Get<UnitOrder>(unit);
             ref var mover = ref world.Get<Mover>(unit);
             var position = world.Get<Position>(unit).Value;
@@ -142,6 +149,50 @@ public sealed class TargetingSystem : ISystem
         }
     }
 
+    // A turret, or a unit firing out of a bunker: keeps a target while it stays in reach, answers whoever shoots it
+    // (a bunker's occupants answer whoever shoots the bunker), and otherwise looks for the nearest enemy in reach.
+    private void FireAtWill(in TickContext context, Entity shooter, ref Armament armament)
+    {
+        var world = context.World;
+        var simulation = context.Simulation;
+        var owner = world.Get<Owner>(shooter).PlayerId;
+        var position = world.Get<Position>(shooter).Value;
+        var reach = simulation.ReachOf(shooter);
+        var body = world.Has<Garrisoned>(shooter) ? world.Get<Garrisoned>(shooter).Bunker : shooter;
+        if (world.Has<StructureInfo>(shooter) && !world.Get<StructureInfo>(shooter).IsComplete)
+        {
+            armament.Target = Entity.None;
+            return;
+        }
+
+        if (!IsValidTarget(context, owner, armament.Target) || !InRange(position, simulation.ClosestPointOf(armament.Target, position), reach))
+        {
+            armament.Target = Entity.None;
+        }
+
+        var attacker = world.Get<Health>(body).LastAttacker;
+        if ((armament.Target.IsNone || world.Has<StructureInfo>(armament.Target))
+            && IsValidTarget(context, owner, attacker) && !world.Has<StructureInfo>(attacker)
+            && InRange(position, world.Get<Position>(attacker).Value, reach))
+        {
+            armament.Target = attacker;
+        }
+
+        if (body == shooter)
+        {
+            world.Get<Health>(body).LastAttacker = Entity.None; // a bunker's attacker is left for every occupant to see
+        }
+
+        if (context.IsStaggeredTick(shooter.Index, ScanPeriod) && (armament.Target.IsNone || world.Has<StructureInfo>(armament.Target)))
+        {
+            var found = FindNearestEnemy(context, _candidates, owner, position, reach, structures: armament.Target.IsNone);
+            if (!found.IsNone || armament.Target.IsNone)
+            {
+                armament.Target = found;
+            }
+        }
+    }
+
     // A guard with nothing left to fight walks back to its post; once there it is at rest again.
     private static void ReturnToPost(in TickContext context, Entity unit, FixVec2 position, ref Armament armament, ref Mover mover)
     {
@@ -208,6 +259,7 @@ public sealed class TargetingSystem : ISystem
         !target.IsNone
         && context.World.IsAlive(target)
         && context.World.Has<Health>(target)
+        && !context.World.Has<Garrisoned>(target)
         && context.Simulation.AreEnemies(owner, context.World.Get<Owner>(target).PlayerId);
 
     /// <summary>

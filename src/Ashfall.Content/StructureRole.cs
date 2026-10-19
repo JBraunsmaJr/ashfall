@@ -20,4 +20,7 @@ public enum StructureRole : byte
 
     /// <summary>Mends the owner's vehicles parked beside it, for credits.</summary>
     RepairBay = 7,
+
+    /// <summary>A guard tower or bunker: holds ground for its owner. Like walls, defences do not extend the build radius.</summary>
+    Defence = 8,
 }

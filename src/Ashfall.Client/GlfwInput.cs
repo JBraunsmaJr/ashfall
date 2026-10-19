@@ -86,6 +86,7 @@ internal sealed class GlfwInput
         GlfwKey.P => Key.P,
         GlfwKey.Q => Key.Q,
         GlfwKey.R => Key.R,
+        GlfwKey.U => Key.U,
         GlfwKey.S => Key.S,
         GlfwKey.W => Key.W,
         GlfwKey.X => Key.X,
