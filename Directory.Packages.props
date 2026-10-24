@@ -19,8 +19,8 @@
 
   <ItemGroup Label="Testing">
     <!-- The combination xUnit 3.2.2's own VSTest template ships with (the VSTest variant of dotnet new xunit3). -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageVersion Include="xunit.v3.mtp-off" Version="3.2.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageVersion Include="xunit.v3.mtp-off" Version="4.0.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
   </ItemGroup>
 </Project>
