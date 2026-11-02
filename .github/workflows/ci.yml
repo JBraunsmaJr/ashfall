@@ -117,7 +117,7 @@ jobs:
           cp lan-match/peer0.hash lan-${{ runner.os }}.hash
 
       - name: Upload determinism hashes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: determinism-${{ runner.os }}
           path: |
@@ -132,27 +132,27 @@ jobs:
             lan-${{ runner.os }}.hash
 
       - name: Upload map generation contact sheet
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mapgen-${{ runner.os }}
           path: mapgen-${{ runner.os }}.png
 
       - name: Upload campaign world map
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: campaign-${{ runner.os }}
           path: campaign-${{ runner.os }}.png
 
       - name: Upload LAN match logs and replay
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lan-match-${{ runner.os }}
           path: lan-match/
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ runner.os }}
           path: TestResults
@@ -246,7 +246,7 @@ jobs:
 
       - name: Upload frames
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: render-smoke-frames
           path: render-*.png
